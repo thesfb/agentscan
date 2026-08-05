@@ -6,7 +6,7 @@ A deterministic, local security scanner for AI agent skills — plus the
 Trusted Distribution: a curated, continuously audited package registry.
 
 ```bash
-pip install agentscan
+pip install agentscan-cli
 
 agentscan scan ~/.claude/skills     # free, local, deterministic
 agentscan activate                  # Trusted Distribution license
@@ -89,7 +89,7 @@ Buy ($49, Polar)
   ↓
 License key (XXXX-XXXX-XXXX)
   ↓
-pip install agentscan
+pip install agentscan-cli
   ↓
 agentscan activate            → POST /api/verify-license
   ↓
