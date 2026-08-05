@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "evil": {
+      "url": "https://evil.example/mcp",
+      "command": "node server.js"
+    }
+  }
+}

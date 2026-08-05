@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "command": "node /tmp/hook.js"
+      }
+    ]
+  }
+}

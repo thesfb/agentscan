@@ -1,0 +1,564 @@
+{
+  "date": "2026-08-05",
+  "corpus": "/tmp/corpus2",
+  "method": "random sample of 4000 unique skills (seed 42) from 8414 total",
+  "repos": 135,
+  "raw_skills": 8850,
+  "total_unique": 8414,
+  "sampled": 4000,
+  "findings": 183911,
+  "per_check_pct": {
+    "shell": 75.3,
+    "secrets": 14.7,
+    "exfil": 4.2,
+    "obfuscation": 0.4,
+    "license": 93.6,
+    "supply_chain": 23.1,
+    "prompt_patterns": 3.3,
+    "filesystem": 7.6,
+    "config_tamper": 0.1
+  },
+  "skills_with_high_pct": 18.0,
+  "per_repo": {
+    "composiohq": {
+      "skills": 420,
+      "high": 4
+    },
+    "mukul975": {
+      "skills": 388,
+      "high": 124
+    },
+    "thebushidocollective": {
+      "skills": 209,
+      "high": 24
+    },
+    "nvidia": {
+      "skills": 163,
+      "high": 59
+    },
+    "anthropics": {
+      "skills": 130,
+      "high": 17
+    },
+    "mindrally": {
+      "skills": 127,
+      "high": 5
+    },
+    "aj-geddes": {
+      "skills": 111,
+      "high": 30
+    },
+    "josiahsiegel": {
+      "skills": 110,
+      "high": 31
+    },
+    "guia-matthieu": {
+      "skills": 87,
+      "high": 1
+    },
+    "onewave-ai": {
+      "skills": 85,
+      "high": 2
+    },
+    "kostja94": {
+      "skills": 84,
+      "high": 2
+    },
+    "posthog": {
+      "skills": 76,
+      "high": 15
+    },
+    "claude-office-skills": {
+      "skills": 73,
+      "high": 1
+    },
+    "bobmatnyc": {
+      "skills": 72,
+      "high": 22
+    },
+    "wshobson": {
+      "skills": 71,
+      "high": 14
+    },
+    "vivy-yi": {
+      "skills": 69,
+      "high": 0
+    },
+    "patricio0312rev": {
+      "skills": 68,
+      "high": 15
+    },
+    "dylantarre": {
+      "skills": 65,
+      "high": 0
+    },
+    "giuseppe-trisciuoglio": {
+      "skills": 63,
+      "high": 22
+    },
+    "forcedotcom": {
+      "skills": 56,
+      "high": 17
+    },
+    "microsoft": {
+      "skills": 50,
+      "high": 17
+    },
+    "googleworkspace": {
+      "skills": 47,
+      "high": 0
+    },
+    "google": {
+      "skills": 45,
+      "high": 11
+    },
+    "daymade": {
+      "skills": 45,
+      "high": 19
+    },
+    "yaklang": {
+      "skills": 43,
+      "high": 16
+    },
+    "vercel-labs": {
+      "skills": 41,
+      "high": 9
+    },
+    "magentosh": {
+      "skills": 40,
+      "high": 1
+    },
+    "agricidaniel": {
+      "skills": 39,
+      "high": 2
+    },
+    "trailofbits": {
+      "skills": 39,
+      "high": 8
+    },
+    "martinholovsky": {
+      "skills": 34,
+      "high": 20
+    },
+    "getsentry": {
+      "skills": 34,
+      "high": 5
+    },
+    "samber": {
+      "skills": 32,
+      "high": 7
+    },
+    "jezweb": {
+      "skills": 32,
+      "high": 5
+    },
+    "manutej": {
+      "skills": 31,
+      "high": 25
+    },
+    "openai": {
+      "skills": 31,
+      "high": 6
+    },
+    "refoundai": {
+      "skills": 30,
+      "high": 0
+    },
+    "dpearson2699": {
+      "skills": 30,
+      "high": 1
+    },
+    "wondelai": {
+      "skills": 30,
+      "high": 0
+    },
+    "alinaqi": {
+      "skills": 30,
+      "high": 6
+    },
+    "jeffallan": {
+      "skills": 29,
+      "high": 14
+    },
+    "phuryn": {
+      "skills": 29,
+      "high": 0
+    },
+    "nexscope-ai": {
+      "skills": 26,
+      "high": 0
+    },
+    "softaworks": {
+      "skills": 21,
+      "high": 4
+    },
+    "flutter": {
+      "skills": 20,
+      "high": 0
+    },
+    "codewithmukesh": {
+      "skills": 20,
+      "high": 1
+    },
+    "mattpocock": {
+      "skills": 19,
+      "high": 1
+    },
+    "coreyhaines31": {
+      "skills": 18,
+      "high": 0
+    },
+    "akin-ozer": {
+      "skills": 18,
+      "high": 16
+    },
+    "skills-collective": {
+      "skills": 18,
+      "high": 0
+    },
+    "eronred": {
+      "skills": 17,
+      "high": 0
+    },
+    "ailabs-393": {
+      "skills": 16,
+      "high": 4
+    },
+    "elastic": {
+      "skills": 15,
+      "high": 8
+    },
+    "addyosmani": {
+      "skills": 15,
+      "high": 3
+    },
+    "caffeinelabs": {
+      "skills": 14,
+      "high": 0
+    },
+    "astronomer": {
+      "skills": 14,
+      "high": 1
+    },
+    "firecrawl": {
+      "skills": 14,
+      "high": 0
+    },
+    "larksuite": {
+      "skills": 13,
+      "high": 1
+    },
+    "intellectronica": {
+      "skills": 12,
+      "high": 3
+    },
+    "langchain-ai": {
+      "skills": 12,
+      "high": 0
+    },
+    "planetscale": {
+      "skills": 11,
+      "high": 1
+    },
+    "dontbesilent2025": {
+      "skills": 11,
+      "high": 1
+    },
+    "jimliu": {
+      "skills": 11,
+      "high": 3
+    },
+    "levnikolaevich": {
+      "skills": 11,
+      "high": 0
+    },
+    "google-gemini": {
+      "skills": 11,
+      "high": 1
+    },
+    "minimax-ai": {
+      "skills": 10,
+      "high": 3
+    },
+    "pbakaus": {
+      "skills": 10,
+      "high": 10
+    },
+    "aaron-he-zhu": {
+      "skills": 10,
+      "high": 0
+    },
+    "obra": {
+      "skills": 10,
+      "high": 0
+    },
+    "worldwonderer": {
+      "skills": 10,
+      "high": 5
+    },
+    "expo": {
+      "skills": 10,
+      "high": 4
+    },
+    "firebase": {
+      "skills": 10,
+      "high": 3
+    },
+    "android": {
+      "skills": 9,
+      "high": 3
+    },
+    "assistant-ui": {
+      "skills": 9,
+      "high": 2
+    },
+    "google-labs-code": {
+      "skills": 9,
+      "high": 0
+    },
+    "clerk": {
+      "skills": 8,
+      "high": 2
+    },
+    "cloudflare": {
+      "skills": 8,
+      "high": 3
+    },
+    "warpdotdev": {
+      "skills": 8,
+      "high": 1
+    },
+    "hashicorp": {
+      "skills": 8,
+      "high": 1
+    },
+    "callstackincubator": {
+      "skills": 8,
+      "high": 0
+    },
+    "new-silvermoon": {
+      "skills": 8,
+      "high": 0
+    },
+    "dimillian": {
+      "skills": 7,
+      "high": 0
+    },
+    "lijigang": {
+      "skills": 7,
+      "high": 2
+    },
+    "clickhouse": {
+      "skills": 7,
+      "high": 4
+    },
+    "leonxlnx": {
+      "skills": 7,
+      "high": 0
+    },
+    "resciencelab": {
+      "skills": 7,
+      "high": 3
+    },
+    "pexoai": {
+      "skills": 7,
+      "high": 1
+    },
+    "apollographql": {
+      "skills": 7,
+      "high": 3
+    },
+    "thedotmack": {
+      "skills": 7,
+      "high": 0
+    },
+    "julianoczkowski": {
+      "skills": 6,
+      "high": 0
+    },
+    "neondatabase": {
+      "skills": 6,
+      "high": 0
+    },
+    "greensock": {
+      "skills": 6,
+      "high": 0
+    },
+    "parallel-web": {
+      "skills": 6,
+      "high": 0
+    },
+    "tw93": {
+      "skills": 6,
+      "high": 1
+    },
+    "ognjengt": {
+      "skills": 6,
+      "high": 0
+    },
+    "rivet-dev": {
+      "skills": 6,
+      "high": 6
+    },
+    "emblemcompany": {
+      "skills": 6,
+      "high": 2
+    },
+    "prisma": {
+      "skills": 6,
+      "high": 4
+    },
+    "contentful": {
+      "skills": 5,
+      "high": 1
+    },
+    "mapbox": {
+      "skills": 5,
+      "high": 1
+    },
+    "better-auth": {
+      "skills": 5,
+      "high": 2
+    },
+    "remotion-dev": {
+      "skills": 5,
+      "high": 2
+    },
+    "wecomteam": {
+      "skills": 5,
+      "high": 0
+    },
+    "lllllllama": {
+      "skills": 5,
+      "high": 3
+    },
+    "trkbt10": {
+      "skills": 5,
+      "high": 0
+    },
+    "ehmo": {
+      "skills": 4,
+      "high": 0
+    },
+    "antfu": {
+      "skills": 4,
+      "high": 2
+    },
+    "pluginagentmarketplace": {
+      "skills": 4,
+      "high": 2
+    },
+    "tavily-ai": {
+      "skills": 4,
+      "high": 3
+    },
+    "momentic-ai": {
+      "skills": 4,
+      "high": 0
+    },
+    "limrun-inc": {
+      "skills": 3,
+      "high": 2
+    },
+    "semgrep": {
+      "skills": 3,
+      "high": 3
+    },
+    "getpaseo": {
+      "skills": 3,
+      "high": 0
+    },
+    "hyf0": {
+      "skills": 3,
+      "high": 0
+    },
+    "resend": {
+      "skills": 3,
+      "high": 2
+    },
+    "gargantuax": {
+      "skills": 2,
+      "high": 2
+    },
+    "apify": {
+      "skills": 2,
+      "high": 0
+    },
+    "browser-use": {
+      "skills": 2,
+      "high": 1
+    },
+    "pilioai": {
+      "skills": 2,
+      "high": 0
+    },
+    "juliusbrussee": {
+      "skills": 2,
+      "high": 0
+    },
+    "genkit-ai": {
+      "skills": 2,
+      "high": 2
+    },
+    "emilkowalski": {
+      "skills": 2,
+      "high": 0
+    },
+    "supabase": {
+      "skills": 2,
+      "high": 0
+    },
+    "wu529778790": {
+      "skills": 2,
+      "high": 0
+    },
+    "nidhinjs": {
+      "skills": 1,
+      "high": 0
+    },
+    "sveltejs": {
+      "skills": 1,
+      "high": 0
+    },
+    "thananon": {
+      "skills": 1,
+      "high": 0
+    },
+    "coderabbitai": {
+      "skills": 1,
+      "high": 0
+    },
+    "awesome-skills": {
+      "skills": 1,
+      "high": 1
+    },
+    "upstash": {
+      "skills": 1,
+      "high": 0
+    },
+    "higgsfield-ai": {
+      "skills": 1,
+      "high": 1
+    },
+    "199-biotechnologies": {
+      "skills": 1,
+      "high": 1
+    },
+    "karpathy": {
+      "skills": 1,
+      "high": 0
+    },
+    "squirrelscan": {
+      "skills": 1,
+      "high": 0
+    },
+    "auth0": {
+      "skills": 1,
+      "high": 0
+    },
+    "vercel": {
+      "skills": 1,
+      "high": 0
+    }
+  }
+}
