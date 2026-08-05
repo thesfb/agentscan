@@ -54,8 +54,8 @@ def read_lines(path):
 def shannon_entropy(s):
     """Shannon entropy in bits/char for a string (gitleaks-style heuristic).
 
-    Strips common separators first so "sk_live_abc123" and
-    "AKIAIOSFODNN7EXAMPLE" score on the token body itself.
+    Strips common separators first so opaque token bodies score on their
+    own entropy rather than on padding characters.
     """
     if not s:
         return 0.0
