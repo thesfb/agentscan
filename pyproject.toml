@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentscan"
+version = "0.4.0"
+description = "Deterministic security scanner for AI agent skills + Trusted Distribution CLI. Local, zero-dependency, executes nothing. Facts, not verdicts."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "baldbee" }]
+keywords = ["security", "ai", "agent", "skills", "llm", "scanner", "mcp", "claude-code", "cursor", "codex", "supply-chain", "distribution"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/thesfb/scanaskill"
+Repository = "https://github.com/thesfb/scanaskill"
+
+[project.scripts]
+agentscan = "agentscan.cli:run"
+scanaskill = "scanaskill.cli:run"  # backward-compatible alias
+
+[tool.setuptools]
+packages = ["agentscan", "scanaskill", "scanaskill.checks"]

