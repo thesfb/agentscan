@@ -19,6 +19,7 @@ CLI points at a different backend.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -88,7 +89,7 @@ def cmd_scan(path: str, severity: str) -> int:
         print(f"  ARTIFACT  [{fmt}] {name}{desc}")
 
     for f in res["findings"]:
-        rel = f["path"]
+        rel = os.path.relpath(f["path"], res["target"])
         loc = f"{rel}:{f['line']}" if f.get("line") else rel
         color = {
             "critical": red, "high": red, "medium": yellow, "low": None, "info": dim,
