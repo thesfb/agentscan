@@ -61,9 +61,14 @@ class License:
 
     @classmethod
     def from_dict(cls, d: dict) -> "License":
+        # Polar returns customer as an object ({email, name, ...}) on the
+        # customer-portal validate endpoint; our mock returned a string.
+        customer = d.get("customer")
+        if isinstance(customer, dict):
+            customer = customer.get("name") or customer.get("email") or "Trusted Distribution Customer"
         return cls(
-            key=d["license_key"],
-            customer=d.get("customer", "Unknown"),
+            key=d.get("license_key") or d.get("key") or "",
+            customer=customer or "Trusted Distribution Customer",
             plan=d.get("plan", "trusted-distribution"),
             expires_at=d.get("expires_at"),
         )

@@ -27,6 +27,11 @@ CACHE_DIR = AGENTSCAN_DIR / "cache"
 
 DEFAULT_API_URL = "https://agentscan.baldbee.me"
 
+# Polar organization id — PUBLIC metadata, not a secret. It is embedded in
+# every license key response and shown in Polar's docs. Hardcoded here so
+# the CLI needs zero configuration: install, activate, done.
+DEFAULT_POLAR_ORGANIZATION_ID = "75ee754e-8e6c-4808-b082-f4384819459c"
+
 
 def ensure_dirs() -> None:
     AGENTSCAN_DIR.mkdir(parents=True, exist_ok=True)

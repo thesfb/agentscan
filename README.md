@@ -85,17 +85,17 @@ license key, activate, install. No dashboard, no browser login, no accounts —
 it's a developer tool.
 
 ```
-Buy ($49, Polar)
+Buy ($49, Polar checkout)
   ↓
-License key (XXXX-XXXX-XXXX)
+License key (shown on your Polar purchases page)
   ↓
 pip install agentscan-cli
   ↓
-agentscan activate            → POST /api/verify-license
+agentscan activate            → Polar /v1/customer-portal/license-keys/validate (direct)
   ↓
 agentscan search              → GET  /api/packages
   ↓
-agentscan install <package>   → download → sha256 → extract → install
+agentscan install <package>   → GET /api/download/<id> (license-gated) → sha256 → extract → install
   ↓
 agentscan update              → like brew upgrade
 ```
@@ -105,9 +105,12 @@ agentscan update              → like brew upgrade
 ```
 PyPI (agentscan CLI, MIT)
    ↓
+Polar (payment + license keys — source of truth, no users table)
+   ↑ direct validation (public endpoint, no server in the middle)
+   |
 agentscan.baldbee.me (Next.js site + API route handlers)
-   ↓
-Polar (license verification — source of truth, no users table)
+   ├── /api/packages       public catalog
+   └── /api/download/[id]  license-gated tarball proxy
    ↓
 agentscan-registry (private GitHub repo)
    ├── packages/        source of truth
@@ -120,7 +123,12 @@ agentscan-registry (private GitHub repo)
 
 The website and API are the same Next.js application. No separate backend,
 no database, no object storage. Git is the source of truth; GitHub Releases
-are the CDN.
+are the CDN. License validation is on-demand against Polar — nothing is
+stored server-side, no webhooks, no subscriptions.
+
+The Polar organization id is public metadata and is baked into the CLI as a
+constant (`DEFAULT_POLAR_ORGANIZATION_ID` in `agentscan/config.py`). Users
+never configure it — install, activate, done.
 
 ### Commands
 
@@ -174,13 +182,13 @@ security-engineer/
 
 ### Status of the paid layer
 
-The API endpoints and license verification are **currently mocked**:
-
-- `POST /api/verify-license` accepts any well-formed `XXXX-XXXX-XXXX` key.
-  Real validation against Polar is the next milestone; the CLI response
-  shape (customer, plan, expiry) is already the Polar contract.
-- Package downloads are **real**: served from the private GitHub registry,
-  checksum-verified end to end.
+- **License verification is real.** `agentscan activate` validates the key
+  against Polar's public customer-portal endpoint on demand. No mock, no
+  database, no webhooks.
+- **Downloads are real and license-gated.** The CLI sends the license key
+  as `Authorization: Bearer <key>`; the site validates it against Polar
+  before proxying the tarball from the private GitHub registry. Checksums
+  are verified end to end (server-side and CLI-side).
 - `signature.sig` is a placeholder; cryptographic signing is designed in
   (`agentscan verify` is structured to add it without CLI changes).
 

@@ -1,14 +1,16 @@
 """API client for the AgentScan Trusted Distribution.
 
-The CLI never talks HTTP directly — every command goes through this client.
-Swapping the mock for the production backend is a one-line URL change.
+Two backends:
 
-Endpoints (Next.js route handlers on the website):
+  Polar (license activation) — the CLI talks to Polar DIRECTLY.
+  Polar's /v1/customer-portal/license-keys/validate endpoint is public and
+  explicitly safe for desktop apps: no secret, no server in the middle.
+  The organization id is public (embedded in every license key response).
 
-    POST /api/verify-license     activate a license key
+  agentscan.baldbee.me (catalog + downloads) — the site's route handlers:
+
     GET  /api/packages           catalog of available packages
-    GET  /api/packages/{id}      single package manifest
-    GET  /api/download/{id}      tarball download (authenticated)
+    GET  /api/download/{id}      tarball download (license-gated)
 
 Errors raise ApiError with a human-readable message; commands catch it and
 print a clean failure instead of a traceback.
@@ -25,6 +27,8 @@ from typing import Optional
 from .models import Catalog, License, Package
 
 DEFAULT_TIMEOUT = 30
+
+POLAR_VALIDATE_URL = "https://api.polar.sh/v1/customer-portal/license-keys/validate"
 
 
 class ApiError(Exception):
@@ -43,7 +47,7 @@ class Client:
     # -- low level ---------------------------------------------------------
 
     def _request(self, method: str, path: str, payload: Optional[dict] = None) -> dict:
-        url = self.base_url + path
+        url = path if path.startswith("http") else self.base_url + path
         data = None
         headers = {"Accept": "application/json", "User-Agent": "agentscan-cli"}
         if payload is not None:
@@ -83,18 +87,31 @@ class Client:
 
     # -- commands ----------------------------------------------------------
 
-    def activate(self, license_key: str) -> License:
-        body = self._request("POST", "/api/verify-license", {"license_key": license_key})
-        if not body.get("valid"):
-            raise ApiError(body.get("error", "license rejected by server"))
+    def activate(self, license_key: str, organization_id: str) -> License:
+        """Validate a license key against Polar directly (public endpoint).
+
+        Returns a License with the fields the CLI stores locally. Raises
+        ApiError when the key is invalid, revoked, disabled, or expired.
+        """
+        try:
+            body = self._request(
+                "POST",
+                POLAR_VALIDATE_URL,
+                {"key": license_key, "organization_id": organization_id},
+            )
+        except ApiError as e:
+            # Polar returns 404/422 for unknown or malformed keys — the
+            # raw body ("ResourceNotFound") is noise; say what happened.
+            if e.status in (401, 404, 422):
+                raise ApiError("invalid license key — check it and try again") from None
+            raise
+        status = body.get("status", "invalid")
+        if status != "granted":
+            raise ApiError(f"license {status}")
         return License.from_dict(body)
 
     def search(self) -> Catalog:
         return Catalog.from_dict(self._request("GET", "/api/packages"))
-
-    def package(self, package_id: str) -> Package:
-        body = self._request("GET", "/api/packages/" + package_id)
-        return Package.from_dict(body.get("package", body))
 
     def download(self, package_id: str, dest: Path) -> None:
         self._download("/api/download/" + package_id, dest)

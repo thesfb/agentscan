@@ -14,7 +14,6 @@ import tarfile
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
 from agentscan import config
 from agentscan.installer import InstallError, _extract, _sha256
@@ -74,6 +73,25 @@ class ModelsTest(unittest.TestCase):
         self.assertEqual(lic.key, "ABCD-EFGH-1234")
         self.assertIsNone(lic.expires_at)
 
+    def test_license_from_polar_response(self):
+        # The customer-portal validate endpoint returns customer as an object.
+        lic = License.from_dict({
+            "key": "POLAR_ABCDEF",
+            "status": "granted",
+            "customer": {"email": "ada@example.com", "name": "Ada Lovelace"},
+            "expires_at": None,
+        })
+        self.assertEqual(lic.key, "POLAR_ABCDEF")
+        self.assertEqual(lic.customer, "Ada Lovelace")
+
+    def test_license_customer_object_falls_back_to_email(self):
+        lic = License.from_dict({
+            "key": "POLAR_ABCDEF",
+            "customer": {"email": "ada@example.com"},
+            "expires_at": None,
+        })
+        self.assertEqual(lic.customer, "ada@example.com")
+
 
 class ConfigTest(unittest.TestCase):
     def setUp(self):
@@ -106,6 +124,14 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(config.api_url(), config.DEFAULT_API_URL)
         config.set_api_url("http://localhost:9999")
         self.assertEqual(config.api_url(), "http://localhost:9999")
+
+    def test_polar_org_id_is_embedded_constant(self):
+        # The org id is public metadata, baked into the CLI — never read
+        # from the environment, never a user-configuration step.
+        self.assertEqual(
+            config.DEFAULT_POLAR_ORGANIZATION_ID,
+            "75ee754e-8e6c-4808-b082-f4384819459c",
+        )
 
 
 class InstallerTest(unittest.TestCase):

@@ -27,6 +27,7 @@ from typing import Optional
 from . import __version__
 from .api import ApiError, Client
 from .config import (
+    DEFAULT_POLAR_ORGANIZATION_ID,
     api_url,
     clear_license,
     load_installed,
@@ -125,7 +126,7 @@ def cmd_activate() -> int:
     client = Client(api_url())
     step("verifying license…")
     try:
-        result = client.activate(key)
+        result = client.activate(key, DEFAULT_POLAR_ORGANIZATION_ID)
     except ApiError as e:
         err(f"activation failed: {e}")
         return 1
