@@ -6,10 +6,13 @@ Commands:
     agentscan activate               activate a Trusted Distribution license
     agentscan logout                 remove the local license
     agentscan whoami                 show the active license
-    agentscan search                 list available packages
+    agentscan search                 browse the catalog
     agentscan install <package>      install a package into Claude Code
-    agentscan update                 update installed packages to the latest
+    agentscan update                 update installed packages
     agentscan verify                 verify installed packages
+
+Every command follows the same shape: start → progress → result → next
+step. Pass --quiet to suppress progress lines for automation.
 
 The scanner is free and local. Everything distribution-related talks to the
 website API through agentscan.api.Client — swap the base URL and the whole
@@ -19,8 +22,10 @@ CLI points at a different backend.
 from __future__ import annotations
 
 import argparse
+import difflib
 import os
 import sys
+import textwrap
 from pathlib import Path
 from typing import Optional
 
@@ -30,15 +35,30 @@ from .config import (
     DEFAULT_POLAR_ORGANIZATION_ID,
     api_url,
     clear_license,
+    ensure_dirs,
     load_installed,
     load_license,
     save_installed,
     save_license,
 )
-from .installer import InstallError, install_package
-from .models import Package
-from .ui import banner, bold, dim, err, green, ok, prompt, red, step, warn, yellow
+from . import installer
+from .installer import InstallError
+from .models import Catalog, Package, normalize_name
+from . import ui
+from .ui import banner, bold, dim, done, err, hint, info, ok, prompt, rule, step, warn
 from .verify import verify_package
+
+EXAMPLES = """\
+examples:
+  agentscan scan .
+  agentscan activate
+  agentscan search
+  agentscan install security-engineer
+  agentscan update
+  agentscan verify
+
+Use 'agentscan <command> --help' for details on a command.
+"""
 
 
 # --------------------------------------------------------------------------
@@ -51,16 +71,154 @@ def _client() -> Client:
     return Client(api_url(), license_key=lic.key if lic else None)
 
 
-def _require_license() -> None:
+def _require_license():
     lic = load_license()
     if lic is None:
         err("not activated — run 'agentscan activate' first")
+        hint("agentscan activate")
         raise SystemExit(1)
-    return lic  # type: ignore[return-value]
+    return lic
 
 
-def _print_package(pkg: Package, width: int = 18) -> None:
-    print(f"  {bold(pkg.title):<{width}}  {green(pkg.version):<10} {dim(pkg.description)}")
+def _wrap(text: str, width: int = 62) -> list:
+    """Wrap to at most two lines, with an ellipsis when truncated."""
+    lines = textwrap.wrap(text, width=width)
+    if len(lines) > 2:
+        lines = lines[:2]
+        lines[-1] = lines[-1].rstrip(".") + "…"
+    return lines
+
+
+def _network_error(e: ApiError) -> None:
+    err("unable to reach the AgentScan registry")
+    print()
+    print("  Check your internet connection.")
+    print(f"  API: {api_url()}")
+    if str(e):
+        print(f"  details: {e}")
+
+
+def _license_error(e: ApiError) -> None:
+    err("license validation failed")
+    print()
+    print("  Possible reasons:")
+    print("    • invalid key")
+    print("    • revoked license")
+    print("    • expired license")
+    print()
+    if str(e):
+        info(f"details: {e}")
+    hint("agentscan activate")
+
+
+def _unknown_package(query: str, catalog: Catalog) -> None:
+    err(f"unknown package: {query}")
+    # best guess for "did you mean"
+    pool: dict[str, str] = {}
+    for p in catalog.packages:
+        pool.setdefault(normalize_name(p.id), p.id)
+        pool.setdefault(normalize_name(p.title), p.id)
+    guess = difflib.get_close_matches(normalize_name(query), list(pool), n=1, cutoff=0.4)
+    if guess:
+        print()
+        print("  Did you mean:")
+        print(f"    {pool[guess[0]]}")
+        print()
+    hint("agentscan search")
+
+
+def _validate_license(lic) -> bool:
+    """Re-validate the stored license against Polar. True when valid."""
+    step("validating license…")
+    try:
+        Client(api_url()).activate(lic.key, DEFAULT_POLAR_ORGANIZATION_ID)
+    except ApiError as e:
+        ui.progress_end()
+        _license_error(e)
+        return False
+    ok("license valid")
+    return True
+
+
+def _install_flow(client: Client, pkg: Package, lic) -> int:
+    """Install one package with full progress UI. Returns exit code."""
+    if not _validate_license(lic):
+        return 1
+
+    ensure_dirs()
+    cf = installer.cache_path(pkg)
+    if cf.exists():
+        info("package already downloaded")
+        ok("download complete")
+    else:
+        step(f"downloading {pkg.asset}…")
+        try:
+            client.download(pkg.id, cf, progress=ui.progress)
+        except ApiError as e:
+            ui.progress_end()
+            _network_error(e)
+            return 1
+        ui.progress_end()
+        ok("download complete")
+
+    step("verifying checksum…")
+    try:
+        installer.verify_checksum(cf, pkg)
+    except InstallError as e:
+        err(str(e))
+        return 1
+    ok("SHA256 verified")
+
+    step("extracting package…")
+    try:
+        tmp = installer.extract_to_temp(cf, pkg)
+    except InstallError as e:
+        err(str(e))
+        return 1
+
+    step("installing skills…")
+    dest = installer.commit_install(tmp, pkg)
+    installed = load_installed()
+    installed[pkg.id] = pkg.version
+    save_installed(installed)
+    done(f"installed {pkg.title} v{pkg.version}")
+    print()
+    _install_summary(pkg, dest)
+    hint("agentscan search")
+    return 0
+
+
+def _install_summary(pkg: Package, dest: Path) -> None:
+    skills, commands, knowledge, has_readme = installer.count_package(dest)
+    rule()
+    print("  Installed")
+    print(f"    {bold(pkg.title)}")
+    print("  Version")
+    print(f"    {pkg.version}")
+    print("  Location")
+    print(f"    {dest}")
+    print("  Skills")
+    print(f"    {skills or '—'}")
+    print("  Commands")
+    print(f"    {commands or '—'}")
+    print("  Knowledge")
+    print(f"    {'Included' if knowledge else '—'}")
+    print("  Documentation")
+    print(f"    {'README.md' if has_readme else '—'}")
+    rule()
+    done("ready to use")
+
+
+def _package_card(pkg: Package) -> None:
+    rule()
+    print(f"  {bold(pkg.title)}")
+    print(f"  id:      {pkg.id}")
+    print(f"  version: {pkg.version}")
+    for line in _wrap(pkg.description):
+        print(f"  {line}")
+    print()
+    print(f"  install: agentscan install {pkg.id}")
+    rule()
 
 
 # --------------------------------------------------------------------------
@@ -79,6 +237,7 @@ def cmd_scan(path: str, severity: str) -> int:
         err(f"not a directory: {path}")
         return 2
 
+    step(f"scanning {path}…")
     res = scan_directory(path)
     banner(f"agentscan {__version__} — {res['target']}")
     print(f"scanned {len(res['skills'])} artifact(s), {len(res['findings'])} finding(s)")
@@ -93,19 +252,19 @@ def cmd_scan(path: str, severity: str) -> int:
         rel = os.path.relpath(f["path"], res["target"])
         loc = f"{rel}:{f['line']}" if f.get("line") else rel
         color = {
-            "critical": red, "high": red, "medium": yellow, "low": None, "info": dim,
+            "critical": ui.red, "high": ui.red, "medium": ui.yellow, "low": None, "info": ui.dim,
         }.get(f["severity"])
         sev = f["severity"].upper()
         line = f"  {sev:8s} [{f['check']}] {f['title']}"
         print(color(line) if color else line)
         print(f"           {loc}")
         if f.get("detail"):
-            print(f"           {dim(f['detail'])}")
+            print(f"           {ui.dim(f['detail'])}")
 
     s = res["summary"]
     print(f"\n  summary: critical={s['critical']} high={s['high']} "
           f"medium={s['medium']} low={s['low']} info={s['info']}")
-    print(dim("  note: findings are observed patterns, not verdicts. Review each before acting."))
+    print(ui.dim("  note: findings are observed patterns, not verdicts. Review each before acting."))
 
     from scanaskill.common import SEV_ORDER
 
@@ -117,25 +276,26 @@ def cmd_scan(path: str, severity: str) -> int:
 def cmd_activate() -> int:
     lic = load_license()
     if lic is not None:
-        ok(f"already activated as {lic.customer} ({lic.plan})")
+        done(f"already activated as {lic.customer} ({lic.plan})")
+        hint("agentscan search")
         return 0
     key = prompt("Enter your AgentScan license:")
     if not key:
         err("no license key provided")
         return 1
-    client = Client(api_url())
-    step("verifying license…")
+    step("contacting Polar…")
     try:
-        result = client.activate(key, DEFAULT_POLAR_ORGANIZATION_ID)
+        result = Client(api_url()).activate(key, DEFAULT_POLAR_ORGANIZATION_ID)
     except ApiError as e:
-        err(f"activation failed: {e}")
+        _license_error(e)
         return 1
+    ok("license validated")
+    step("saving license…")
     save_license(result)
-    ok(f"activated — welcome, {result.customer} ({result.plan})")
-    if result.expires_at:
-        print(dim(f"  expires {result.expires_at}"))
-    else:
-        print(dim("  no expiry"))
+    done("activation successful")
+    print(f"  {bold(result.customer)} ({result.plan})")
+    info(f"expires: {result.expires_at or 'never'}")
+    hint("agentscan search")
     return 0
 
 
@@ -143,8 +303,10 @@ def cmd_logout() -> int:
     if load_license() is None:
         warn("not activated")
         return 0
+    step("removing local license…")
     clear_license()
-    ok("logged out")
+    done("logged out")
+    hint("agentscan activate")
     return 0
 
 
@@ -153,11 +315,14 @@ def cmd_whoami() -> int:
     if lic is None:
         warn("not activated — run 'agentscan activate'")
         return 1
+    rule()
     print(f"  {bold(lic.customer)}")
-    print(f"  plan:      {lic.plan}")
-    print(f"  license:   {lic.key}")
-    print(f"  expires:   {lic.expires_at or 'never'}")
-    print(dim(f"  api:       {api_url()}"))
+    print(f"  plan:     {lic.plan}")
+    print(f"  license:  {lic.key}")
+    print(f"  expires:  {lic.expires_at or 'never'}")
+    print(f"  api:      {api_url()}")
+    rule()
+    hint("agentscan logout")
     return 0
 
 
@@ -167,46 +332,55 @@ def cmd_search() -> int:
     try:
         catalog = client.search()
     except ApiError as e:
-        err(str(e))
+        _network_error(e)
         return 1
     if not catalog.packages:
         warn("catalog is empty")
         return 0
-    banner("Trusted Distribution")
-    for pkg in catalog.packages:
-        _print_package(pkg)
-    print(dim(f"\n  {len(catalog.packages)} package(s) — 'agentscan install <name>' to install"))
+    ok(f"{len(catalog.packages)} package(s) available")
+    print()
+    for i, pkg in enumerate(catalog.packages):
+        _package_card(pkg)
+        if i < len(catalog.packages) - 1:
+            print()
+    hint("agentscan install <name>")
     return 0
 
 
-def _resolve_package(client: Client, package_id: str) -> Optional[Package]:
-    try:
-        catalog = client.search()
-    except ApiError as e:
-        err(str(e))
+def _resolve(catalog: Catalog, query: str) -> Optional[Package]:
+    pkg, note, candidates, suggestion = catalog.resolve(query)
+    if candidates:
+        err(f"ambiguous package: {query}")
+        print()
+        print("  Did you mean one of:")
+        for c in candidates:
+            print(f"    {c}")
+        print()
+        hint("agentscan search")
         return None
-    pkg = catalog.find(package_id)
     if pkg is None:
-        err(f"unknown package: {package_id} — run 'agentscan search'")
+        _unknown_package(query, catalog)
+        return None
+    if note:
+        info(note)
     return pkg
 
 
-def cmd_install(package_id: str) -> int:
+def cmd_install(query: str) -> int:
     _require_license()
     client = _client()
-    pkg = _resolve_package(client, package_id)
+    step("fetching catalog…")
+    try:
+        catalog = client.search()
+    except ApiError as e:
+        _network_error(e)
+        return 1
+    ok("catalog received")
+
+    pkg = _resolve(catalog, query)
     if pkg is None:
         return 1
-    try:
-        install_package(client, pkg)
-    except (ApiError, InstallError) as e:
-        err(str(e))
-        return 1
-    installed = load_installed()
-    installed[pkg.id] = pkg.version
-    save_installed(installed)
-    ok(f"{pkg.id} {pkg.version} installed")
-    return 0
+    return _install_flow(client, pkg, load_license())
 
 
 def cmd_update() -> int:
@@ -214,38 +388,46 @@ def cmd_update() -> int:
     client = _client()
     installed = load_installed()
     if not installed:
-        warn("nothing installed yet — 'agentscan search' then 'agentscan install <name>'")
+        warn("nothing installed yet")
+        hint("agentscan search")
         return 0
-    step("fetching catalog…")
+    step("checking for updates…")
     try:
         catalog = client.search()
     except ApiError as e:
-        err(str(e))
+        _network_error(e)
         return 1
+    ok("catalog received")
 
     updated = 0
+    failed = 0
     for package_id, current in sorted(installed.items()):
         pkg = catalog.find(package_id)
         if pkg is None:
             warn(f"{package_id}: no longer in catalog")
             continue
+        print(f"  {bold(pkg.title)}")
+        print(f"    current: {current}")
+        print(f"    latest:  {pkg.version}")
         if pkg.version == current:
-            print(f"  {bold(pkg.title)} {green(pkg.version)} — up to date")
+            ok("up to date")
+            print()
             continue
-        print(f"  {bold(pkg.title)} {dim(current)} → {green(pkg.version)}")
-        try:
-            install_package(client, pkg)
-        except (ApiError, InstallError) as e:
-            err(f"{package_id}: {e}")
+        if _install_flow(client, pkg, load_license()) != 0:
+            failed += 1
+            print()
             continue
         installed[package_id] = pkg.version
         updated += 1
+        print()
     save_installed(installed)
     if updated:
-        ok(f"updated {updated} package(s)")
-    else:
+        done(f"updated {updated} package(s)")
+    if failed:
+        err(f"{failed} update(s) failed")
+    if not updated and not failed:
         ok("everything is up to date")
-    return 0
+    return 1 if failed else 0
 
 
 def cmd_verify() -> int:
@@ -259,7 +441,7 @@ def cmd_verify() -> int:
     try:
         catalog = client.search()
     except ApiError as e:
-        err(str(e))
+        _network_error(e)
         return 1
 
     all_ok = True
@@ -269,7 +451,8 @@ def cmd_verify() -> int:
             err(f"{package_id}: not found in catalog")
             all_ok = False
             continue
-        banner(pkg.title)
+        rule()
+        print(f"  {bold(pkg.title)}  {dim(version)}")
         checks = verify_package(pkg, version, client)
         for label, passed, detail in checks:
             if passed:
@@ -277,6 +460,7 @@ def cmd_verify() -> int:
             else:
                 err(f"{label} — {detail}")
                 all_ok = False
+        rule()
         print()
     return 0 if all_ok else 1
 
@@ -287,33 +471,43 @@ def cmd_verify() -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    # Shared flags: --quiet works before OR after the subcommand.
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("-q", "--quiet", action="store_true", default=argparse.SUPPRESS,
+                        help="suppress progress output (results and errors still print)")
+
     p = argparse.ArgumentParser(
         prog="agentscan",
         description="The trust layer for AI agent skills. Free scanner + Trusted Distribution.",
+        epilog=EXAMPLES,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        parents=[common],
     )
     p.add_argument("--version", action="version", version=f"agentscan {__version__}")
     sub = p.add_subparsers(dest="command", metavar="<command>")
 
-    sp = sub.add_parser("scan", help="scan a directory of agent skills (free, local)")
+    sp = sub.add_parser("scan", help="scan a directory of agent skills (free, local)", parents=[common])
     sp.add_argument("path", nargs="?", default=".")
     sp.add_argument("--severity", default="medium",
                     choices=["info", "low", "medium", "high", "critical"])
 
-    sub.add_parser("activate", help="activate a Trusted Distribution license")
-    sub.add_parser("logout", help="remove the local license")
-    sub.add_parser("whoami", help="show the active license")
-    sub.add_parser("search", help="list packages in the Trusted Distribution")
+    sub.add_parser("activate", help="activate a Trusted Distribution license", parents=[common])
+    sub.add_parser("logout", help="remove the local license", parents=[common])
+    sub.add_parser("whoami", help="show the active license", parents=[common])
+    sub.add_parser("search", help="browse the Trusted Distribution catalog", parents=[common])
 
-    sp = sub.add_parser("install", help="install a package into Claude Code")
-    sp.add_argument("package", metavar="<package>")
+    sp = sub.add_parser("install", help="install a package into Claude Code", parents=[common])
+    sp.add_argument("package", nargs="+", metavar="<package>",
+                    help="package id, title, or any unambiguous prefix")
 
-    sub.add_parser("update", help="update installed packages to the latest version")
-    sub.add_parser("verify", help="verify installed packages")
+    sub.add_parser("update", help="update installed packages to the latest version", parents=[common])
+    sub.add_parser("verify", help="verify installed packages", parents=[common])
     return p
 
 
 def main(argv: Optional[list] = None) -> int:
     args = build_parser().parse_args(argv)
+    ui.QUIET = bool(getattr(args, "quiet", False))
     if args.command == "scan":
         return cmd_scan(args.path, args.severity)
     if args.command == "activate":
@@ -325,7 +519,7 @@ def main(argv: Optional[list] = None) -> int:
     if args.command == "search":
         return cmd_search()
     if args.command == "install":
-        return cmd_install(args.package)
+        return cmd_install(" ".join(args.package))
     if args.command == "update":
         return cmd_update()
     if args.command == "verify":

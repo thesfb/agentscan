@@ -67,7 +67,7 @@ class Client:
         except ValueError:
             raise ApiError("server returned non-JSON response") from None
 
-    def _download(self, path: str, dest: Path) -> None:
+    def _download(self, path: str, dest: Path, progress=None) -> None:
         url = self.base_url + path
         headers = {"Accept": "application/octet-stream", "User-Agent": "agentscan-cli"}
         if self.license_key:
@@ -75,11 +75,16 @@ class Client:
         req = urllib.request.Request(url, headers=headers)
         try:
             with urllib.request.urlopen(req, timeout=60) as resp, open(dest, "wb") as fh:
+                total = int(resp.headers.get("Content-Length") or 0)
+                done = 0
                 while True:
                     chunk = resp.read(64 * 1024)
                     if not chunk:
                         break
                     fh.write(chunk)
+                    done += len(chunk)
+                    if progress:
+                        progress(done, total)
         except urllib.error.HTTPError as e:
             raise ApiError(_error_detail(e), status=e.code) from None
         except urllib.error.URLError as e:
@@ -113,8 +118,8 @@ class Client:
     def search(self) -> Catalog:
         return Catalog.from_dict(self._request("GET", "/api/packages"))
 
-    def download(self, package_id: str, dest: Path) -> None:
-        self._download("/api/download/" + package_id, dest)
+    def download(self, package_id: str, dest: Path, progress=None) -> None:
+        self._download("/api/download/" + package_id, dest, progress=progress)
 
 
 def _error_detail(e: urllib.error.HTTPError) -> str:

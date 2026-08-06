@@ -49,6 +49,87 @@ class Catalog:
                 return p
         return None
 
+    def resolve(self, query: str):
+        """Resolve a user-supplied package query to a package.
+
+        Matching is forgiving: whitespace, hyphens, underscores and case
+        are all normalized ("devops-engineer", "DevOps Engineer",
+        "DEVOPS ENGINEER" and "devops" all resolve to devops-engineer).
+
+        Returns a 4-tuple:
+            (package, note, candidates, suggestion)
+
+        - package:   the resolved package, or None.
+        - note:      a friendly "matched X → id" line when the match was
+                     not exact, else "".
+        - candidates: list of package ids when the query is ambiguous
+                     (more than one match); empty otherwise.
+        - suggestion: a single best-guess id when nothing matched (for
+                     "did you mean"), else None.
+        """
+        q = normalize_name(query)
+        if not q:
+            return None, "", [], None
+
+        def norm(p: Package) -> tuple[str, str]:
+            return normalize_name(p.id), normalize_name(p.title)
+
+        # 1. exact id or title
+        for p in self.packages:
+            nid, ntitle = norm(p)
+            if nid == q or ntitle == q:
+                return p, "", [], None
+
+        # 2. prefix (id or title starts with the query)
+        prefix = [p for p in self.packages if norm(p)[0].startswith(q) or norm(p)[1].startswith(q)]
+        if len(prefix) == 1:
+            return prefix[0], f"matched '{query}' → {prefix[0].id}", [], None
+        if len(prefix) > 1:
+            return None, "", [p.id for p in prefix], None
+
+        # 2b. word match (query is a whole word of the id/title:
+        #     "security" → security-engineer, "engineer" → ambiguous)
+        word_matches = [
+            p for p in self.packages
+            if q in norm(p)[0].split() or q in norm(p)[1].split()
+        ]
+        if len(word_matches) == 1:
+            return word_matches[0], f"matched '{query}' → {word_matches[0].id}", [], None
+        if len(word_matches) > 1:
+            return None, "", [p.id for p in word_matches], None
+
+        # 3. fuzzy (typos: "secuirty" → security-engineer)
+        import difflib
+
+        pool: dict[str, Package] = {}
+        for p in self.packages:
+            nid, ntitle = norm(p)
+            pool.setdefault(nid, p)
+            pool.setdefault(ntitle, p)
+        close = difflib.get_close_matches(q, list(pool), n=3, cutoff=0.5)
+        ids: list[str] = []
+        for key in close:
+            pid = pool[key].id
+            if pid not in ids:
+                ids.append(pid)
+        if len(ids) == 1:
+            return pool[close[0]], f"matched '{query}' → {ids[0]}", [], None
+        if len(ids) > 1:
+            return None, "", ids, None
+
+        # 4. total miss: single best guess for "did you mean"
+        guess = difflib.get_close_matches(q, list(pool), n=1, cutoff=0.4)
+        return None, "", [], (pool[guess[0]].id if guess else None)
+
+
+def normalize_name(name: str) -> str:
+    """Lowercase and collapse separators: hyphens, underscores, spaces.
+
+    "DevOps Engineer", "devops-engineer", "DEVOPS_ENGINEER" and
+    "  devops  engineer " all normalize to "devops engineer".
+    """
+    return " ".join(name.lower().replace("_", " ").replace("-", " ").split())
+
 
 @dataclass(frozen=True)
 class License:

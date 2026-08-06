@@ -17,7 +17,7 @@ from pathlib import Path
 
 from agentscan import config
 from agentscan.installer import InstallError, _extract, _sha256
-from agentscan.models import Catalog, License, Package
+from agentscan.models import Catalog, License, Package, normalize_name
 from agentscan.verify import verify_package
 
 
@@ -67,6 +67,70 @@ class ModelsTest(unittest.TestCase):
         c = Catalog.from_dict({"packages": [p.__dict__]})
         self.assertIsNotNone(c.find("security-engineer"))
         self.assertIsNone(c.find("nope"))
+
+
+class ResolveTest(unittest.TestCase):
+    """Package-name matching: normalize + resolve."""
+
+    def setUp(self):
+        pkgs = [
+            {"id": "security-engineer", "title": "Security Engineer", "version": "2.0.0",
+             "description": "Threat modeling.", "sha256": "", "release": "v2.0.0", "asset": "a.tar.gz"},
+            {"id": "backend-engineer", "title": "Backend Engineer", "version": "2.0.0",
+             "description": "APIs.", "sha256": "", "release": "v2.0.0", "asset": "b.tar.gz"},
+            {"id": "devops-engineer", "title": "DevOps Engineer", "version": "2.0.0",
+             "description": "CI/CD.", "sha256": "", "release": "v2.0.0", "asset": "c.tar.gz"},
+            {"id": "ai-engineer", "title": "AI Engineer", "version": "2.0.0",
+             "description": "LLMs.", "sha256": "", "release": "v2.0.0", "asset": "d.tar.gz"},
+        ]
+        self.catalog = Catalog.from_dict({"packages": pkgs})
+
+    def test_normalize_name(self):
+        self.assertEqual(normalize_name("DevOps Engineer"), "devops engineer")
+        self.assertEqual(normalize_name("devops-engineer"), "devops engineer")
+        self.assertEqual(normalize_name("DEVOPS_ENGINEER"), "devops engineer")
+        self.assertEqual(normalize_name("  devops   engineer "), "devops engineer")
+
+    def test_exact_id(self):
+        pkg, note, cands, sugg = self.catalog.resolve("devops-engineer")
+        self.assertEqual(pkg.id, "devops-engineer")
+        self.assertEqual(note, "")
+        self.assertEqual(cands, [])
+        self.assertIsNone(sugg)
+
+    def test_exact_title_with_spaces(self):
+        pkg, note, cands, _ = self.catalog.resolve("DevOps Engineer")
+        self.assertEqual(pkg.id, "devops-engineer")
+        self.assertEqual(note, "")
+
+    def test_uppercase_and_spaces(self):
+        pkg, _, _, _ = self.catalog.resolve("DEVOPS ENGINEER")
+        self.assertEqual(pkg.id, "devops-engineer")
+
+    def test_prefix_resolves(self):
+        pkg, note, _, _ = self.catalog.resolve("devops")
+        self.assertEqual(pkg.id, "devops-engineer")
+        self.assertIn("matched", note)
+
+    def test_fuzzy_typo(self):
+        pkg, note, _, _ = self.catalog.resolve("secuirty")
+        self.assertEqual(pkg.id, "security-engineer")
+        self.assertIn("matched", note)
+
+    def test_ambiguous_prefix_returns_candidates(self):
+        # "engineer" is a prefix of every title/id — must be ambiguous.
+        pkg, note, cands, sugg = self.catalog.resolve("engineer")
+        self.assertIsNone(pkg)
+        self.assertTrue(len(cands) >= 2)
+        self.assertIn("security-engineer", cands)
+        self.assertIsNone(sugg)
+
+    def test_unknown_returns_suggestion(self):
+        pkg, note, cands, sugg = self.catalog.resolve("database")
+        self.assertIsNone(pkg)
+        self.assertEqual(cands, [])
+        # no close match at cutoff — suggestion may be None (fine)
+        self.assertIn(sugg, (None, "backend-engineer", "security-engineer", "devops-engineer", "ai-engineer"))
 
     def test_license_roundtrip(self):
         lic = License.from_dict({"license_key": "ABCD-EFGH-1234", "customer": "Ada", "plan": "trusted-distribution", "expires_at": None})

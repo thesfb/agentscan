@@ -133,14 +133,28 @@ never configure it — install, activate, done.
 ### Commands
 
 ```bash
-agentscan activate                 # prompt for license → verify → store
-agentscan logout                   # remove local license
-agentscan whoami                   # show active license
-agentscan search                   # catalog from GET /api/packages
-agentscan install <package>        # verified install into Claude Code
-agentscan update                   # upgrade installed packages
-agentscan verify                   # signature · latest · audit · intact
+agentscan scan .                    # scan a directory of agent skills (free)
+agentscan activate                  # prompt for license → verify → store
+agentscan logout                    # remove local license
+agentscan whoami                    # show active license
+agentscan search                    # browse the catalog (package cards)
+agentscan install <package>         # verified install into Claude Code
+agentscan update                    # upgrade installed packages
+agentscan verify                    # signature · latest · audit · intact
 ```
+
+Package names are matched flexibly — any of these work:
+
+```bash
+agentscan install security-engineer
+agentscan install "Security Engineer"
+agentscan install Security Engineer
+agentscan install security
+agentscan install secuirty        # typos are suggested, not silent
+```
+
+Add `--quiet` (or `-q`) to suppress progress lines for automation; results
+and errors still print. Run `agentscan --help` for examples.
 
 ### Local state
 
