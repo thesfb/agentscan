@@ -7,7 +7,8 @@ Commands:
     agentscan logout                 remove the local license
     agentscan whoami                 show the active license
     agentscan search                 browse the catalog
-    agentscan install <package>      install a package into Claude Code
+    agentscan install <package>      install a package (auto-detect runtime)
+    agentscan install <p> --runtime codex   install into a specific runtime
     agentscan update                 update installed packages
     agentscan verify                 verify installed packages
 
@@ -42,8 +43,10 @@ from .config import (
     save_license,
 )
 from . import installer
-from .installer import InstallError
+from .installer import InstallError, RUNTIME_DIRS, RUNTIME_NAMES
 from .models import Catalog, Package, normalize_name
+from . import runtimes
+from .runtimes import detect_installed, prompt_for_runtime, resolve_runtimes
 from . import ui
 from .ui import banner, bold, dim, done, err, hint, info, ok, prompt, rule, step, warn
 from .verify import verify_package
@@ -140,7 +143,7 @@ def _validate_license(lic) -> bool:
     return True
 
 
-def _install_flow(client: Client, pkg: Package, lic) -> int:
+def _install_flow(client: Client, pkg: Package, lic, runtimes_: List[str]) -> int:
     """Install one package with full progress UI. Returns exit code."""
     if not _validate_license(lic):
         return 1
@@ -177,34 +180,63 @@ def _install_flow(client: Client, pkg: Package, lic) -> int:
         return 1
 
     step("installing skills…")
-    dest = installer.commit_install(tmp, pkg)
+    counts = (0, 0, 0, False)
+    try:
+        result = installer.install_layouts(tmp, pkg, runtimes_)
+        counts = installer.count_package(tmp)
+    except InstallError as e:
+        err(str(e))
+        return 1
+    finally:
+        import shutil as _shutil
+
+        _shutil.rmtree(tmp, ignore_errors=True)
+
+    # Bookkeeping: record version + per-runtime skill lists.
     installed = load_installed()
-    installed[pkg.id] = pkg.version
+    record = installed.get(pkg.id, {"version": pkg.version, "runtimes": {}})
+    record["version"] = pkg.version
+    for runtime in runtimes_:
+        root = RUNTIME_DIRS[runtime]
+        skills = sorted(
+            d.name for d in root.iterdir() if d.is_dir() and (d / "SKILL.md").is_file()
+        ) if root.is_dir() else []
+        record["runtimes"][runtime] = {"skills": skills}
+    installed[pkg.id] = record
     save_installed(installed)
     done(f"installed {pkg.title} v{pkg.version}")
     print()
-    _install_summary(pkg, dest)
+    _install_summary(pkg, counts, record["runtimes"], result.agents_written)
     hint("agentscan search")
     return 0
 
 
-def _install_summary(pkg: Package, dest: Path) -> None:
-    skills, commands, knowledge, has_readme = installer.count_package(dest)
+def _install_summary(pkg: Package, counts, runtimes_: dict, agents_written) -> None:
+    skills, commands, knowledge, has_readme = counts
     rule()
-    print("  Installed")
+    print(f"  Installed")
     print(f"    {bold(pkg.title)}")
     print("  Version")
     print(f"    {pkg.version}")
-    print("  Location")
-    print(f"    {dest}")
-    print("  Skills")
-    print(f"    {skills or '—'}")
-    print("  Commands")
-    print(f"    {commands or '—'}")
-    print("  Knowledge")
-    print(f"    {'Included' if knowledge else '—'}")
-    print("  Documentation")
-    print(f"    {'README.md' if has_readme else '—'}")
+    for runtime, record in runtimes_.items():
+        print(f"  {RUNTIME_NAMES.get(runtime, runtime)}")
+        print(f"    {RUNTIME_DIRS[runtime]}")
+        n = len(record.get("skills", []))
+        print(f"    {n} skill(s)")
+    if skills or commands or knowledge or has_readme:
+        print("  Package contents")
+        if skills:
+            print(f"    skills:      {skills}")
+        if commands:
+            print(f"    commands:    {commands}")
+        if knowledge:
+            print(f"    knowledge:   {knowledge}")
+        if has_readme:
+            print(f"    README:      included")
+    if agents_written:
+        print("  AGENTS.md")
+        for path in agents_written:
+            print(f"    {path}")
     rule()
     done("ready to use")
 
@@ -366,7 +398,7 @@ def _resolve(catalog: Catalog, query: str) -> Optional[Package]:
     return pkg
 
 
-def cmd_install(query: str) -> int:
+def cmd_install(query: str, runtime_flag: Optional[str] = None) -> int:
     _require_license()
     client = _client()
     step("fetching catalog…")
@@ -380,7 +412,22 @@ def cmd_install(query: str) -> int:
     pkg = _resolve(catalog, query)
     if pkg is None:
         return 1
-    return _install_flow(client, pkg, load_license())
+
+    runtimes_ = resolve_runtimes(runtime_flag)
+    if not runtimes_:
+        detected = detect_installed()
+        if not detected:
+            warn("no supported agent runtime detected on this machine")
+            info("pass --runtime claude|opencode|codex to choose one")
+            return 1
+        runtimes_ = prompt_for_runtime()
+        if not runtimes_:
+            err("no runtime selected")
+            return 1
+    if runtime_flag in (None, "", "auto") and len(runtimes_) > 1:
+        names = ", ".join(RUNTIME_NAMES.get(r, r) for r in runtimes_)
+        info(f"detected runtime(s): {names}")
+    return _install_flow(client, pkg, load_license(), runtimes_)
 
 
 def cmd_update() -> int:
@@ -401,23 +448,24 @@ def cmd_update() -> int:
 
     updated = 0
     failed = 0
-    for package_id, current in sorted(installed.items()):
+    for package_id, record in sorted(installed.items()):
+        version = record.get("version", "")
+        runtimes_ = list(record.get("runtimes", {}).keys()) or detect_installed()
         pkg = catalog.find(package_id)
         if pkg is None:
             warn(f"{package_id}: no longer in catalog")
             continue
         print(f"  {bold(pkg.title)}")
-        print(f"    current: {current}")
+        print(f"    current: {version}")
         print(f"    latest:  {pkg.version}")
-        if pkg.version == current:
+        if pkg.version == version:
             ok("up to date")
             print()
             continue
-        if _install_flow(client, pkg, load_license()) != 0:
+        if _install_flow(client, pkg, load_license(), runtimes_) != 0:
             failed += 1
             print()
             continue
-        installed[package_id] = pkg.version
         updated += 1
         print()
     save_installed(installed)
@@ -445,7 +493,9 @@ def cmd_verify() -> int:
         return 1
 
     all_ok = True
-    for package_id, version in sorted(installed.items()):
+    for package_id, record in sorted(installed.items()):
+        version = record.get("version", "")
+        runtimes_ = list(record.get("runtimes", {}).keys()) or detect_installed()
         pkg = catalog.find(package_id)
         if pkg is None:
             err(f"{package_id}: not found in catalog")
@@ -460,6 +510,20 @@ def cmd_verify() -> int:
             else:
                 err(f"{label} — {detail}")
                 all_ok = False
+        # Per-runtime layout check: each recorded skill dir must exist.
+        for runtime, rrec in record.get("runtimes", {}).items():
+            root = RUNTIME_DIRS[runtime]
+            missing = [s for s in rrec.get("skills", []) if not (root / s / "SKILL.md").exists()]
+            if missing:
+                err(f"{runtime} — {len(missing)} skill(s) missing: {', '.join(missing[:3])}")
+                all_ok = False
+            else:
+                ok(f"{runtime} — {len(rrec.get('skills', []))} skill(s) present")
+        # Legacy nested install warning.
+        legacy = Path.home() / ".claude" / "skills" / package_id
+        if legacy.is_dir():
+            warn("legacy nested layout detected at ~/.claude/skills/"
+                 f"{package_id} — reinstall to make it discoverable")
         rule()
         print()
     return 0 if all_ok else 1
@@ -496,9 +560,17 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("whoami", help="show the active license", parents=[common])
     sub.add_parser("search", help="browse the Trusted Distribution catalog", parents=[common])
 
-    sp = sub.add_parser("install", help="install a package into Claude Code", parents=[common])
+    sp = sub.add_parser(
+        "install",
+        help="install a package into Claude Code, OpenCode, or Codex",
+        parents=[common],
+    )
     sp.add_argument("package", nargs="+", metavar="<package>",
                     help="package id, title, or any unambiguous prefix")
+    sp.add_argument(
+        "--runtime", default=None, metavar="claude|opencode|codex|all",
+        help="target runtime (default: auto-detect installed runtimes)",
+    )
 
     sub.add_parser("update", help="update installed packages to the latest version", parents=[common])
     sub.add_parser("verify", help="verify installed packages", parents=[common])
@@ -519,7 +591,7 @@ def main(argv: Optional[list] = None) -> int:
     if args.command == "search":
         return cmd_search()
     if args.command == "install":
-        return cmd_install(" ".join(args.package))
+        return cmd_install(" ".join(args.package), getattr(args, "runtime", None))
     if args.command == "update":
         return cmd_update()
     if args.command == "verify":

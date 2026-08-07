@@ -1,21 +1,24 @@
-"""Package installer: download → checksum → extract → install into Claude Code.
+"""Package installer: download → checksum → extract → install into runtimes.
 
-The package is a tarball of a package directory (manifest.json + agents/,
-skills/, commands/, templates/, knowledge/, audit.json). It is extracted
-into ~/.claude/skills/<package-id>/ so the skills inside become available
-to Claude Code, and the installed version is recorded in installed.json.
+The package tarball contains canonical `skills/<id>/SKILL.md` plus generated
+per-runtime layouts (`claude/`, `opencode/`, `codex/`) and an `AGENTS.md`
+for the agents.md convention. The installer copies each skill into the
+selected runtime's skills directory, flattened one level:
+
+    claude   → ~/.claude/skills/<skill-id>/
+    opencode → ~/.config/opencode/skills/<skill-id>/
+    codex    → ~/.agents/skills/<skill-id>/   (+ AGENTS.md to repo root)
 
 The flow is split into stages so the CLI can show progress per stage:
 
     cache_path()      → where the downloaded tarball lives
     verify_checksum() → sha256 against the catalog
     extract_to_temp() → unpack + validate the manifest
-    commit_install()  → swap the temp dir into place
+    install_layouts() → copy per-runtime layouts into place
     count_package()   → skills/commands/knowledge/readme stats
+    remove_package()  → remove an installed package's layouts
 
 install_package() is the combined convenience form.
-
-The exact Claude Code layout can evolve; everything is local and visible.
 """
 
 from __future__ import annotations
@@ -24,15 +27,29 @@ import hashlib
 import json
 import shutil
 import tarfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from .api import ApiError, Client
 from . import config
 from .models import Package
 
-CLAUDE_SKILLS_DIR = Path.home() / ".claude" / "skills"
+# Official runtime discovery roots (verified against runtime docs 2026-08).
+RUNTIME_DIRS: Dict[str, Path] = {
+    "claude": Path.home() / ".claude" / "skills",
+    "opencode": Path.home() / ".config" / "opencode" / "skills",
+    "codex": Path.home() / ".agents" / "skills",
+}
+
+# Layout subdir inside the package tarball per runtime.
+RUNTIME_LAYOUT = {"claude": "claude", "opencode": "opencode", "codex": "codex"}
+
+RUNTIME_NAMES = {
+    "claude": "Claude Code",
+    "opencode": "OpenCode",
+    "codex": "OpenAI Codex",
+}
 
 
 class InstallError(Exception):
@@ -44,11 +61,13 @@ class InstallResult:
     """What an install produced — used for the post-install summary."""
 
     pkg: Package
-    dest: Path
-    skills: int
-    commands: int
-    knowledge: int
-    has_readme: bool
+    runtimes: List[str] = field(default_factory=list)
+    dests: Dict[str, Path] = field(default_factory=dict)
+    skills: int = 0
+    commands: int = 0
+    knowledge: int = 0
+    has_readme: bool = False
+    agents_written: List[str] = field(default_factory=list)
 
 
 def _sha256(path: Path) -> str:
@@ -60,12 +79,7 @@ def _sha256(path: Path) -> str:
 
 
 def _extract(tarball: Path, dest: Path) -> None:
-    """Extract a package tarball into dest.
-
-    Tarballs are expected to contain a single top-level directory (the
-    package dir, e.g. security-engineer/). It is stripped so contents land
-    directly in dest.
-    """
+    """Extract a package tarball into dest, stripping the top-level dir."""
     dest.mkdir(parents=True, exist_ok=True)
     with tarfile.open(tarball, "r:gz") as tf:
         members = tf.getmembers()
@@ -87,10 +101,6 @@ def _extract(tarball: Path, dest: Path) -> None:
                     tf.extract(member, dest)
 
 
-def _install_dir_for(package_id: str) -> Path:
-    return CLAUDE_SKILLS_DIR / package_id
-
-
 def cache_path(pkg: Package) -> Path:
     """Where the downloaded tarball is cached (~/.agentscan/cache/<asset>)."""
     return config.CACHE_DIR / pkg.asset
@@ -106,16 +116,15 @@ def verify_checksum(tarball: Path, pkg: Package) -> None:
         )
 
 
-def extract_to_temp(tarball: Path, pkg: Package) -> Path:
+def extract_to_temp(tarball: Path, pkg: Package, tmp: Optional[Path] = None) -> Path:
     """Extract a downloaded tarball into a temp dir and validate its
     manifest. Returns the temp dir (not yet in its final place)."""
-    dest = _install_dir_for(pkg.id)
-    tmp = dest.with_name(dest.name + ".tmp")
+    if tmp is None:
+        tmp = Path(config.AGENTSCAN_DIR) / f"{pkg.id}.tmp"
     if tmp.exists():
         shutil.rmtree(tmp)
     _extract(tarball, tmp)
 
-    # Validate the manifest before swapping into place.
     manifest_path = tmp / "manifest.json"
     try:
         manifest = json.loads(manifest_path.read_text())
@@ -130,17 +139,96 @@ def extract_to_temp(tarball: Path, pkg: Package) -> Path:
     return tmp
 
 
-def commit_install(tmp: Path, pkg: Package) -> Path:
-    """Move the validated temp dir into its final location."""
-    dest = _install_dir_for(pkg.id)
-    if dest.exists():
-        shutil.rmtree(dest)
-    tmp.rename(dest)
-    return dest
+def _layout_dir(tmp: Path, runtime: str) -> Path:
+    """The per-runtime layout dir inside an extracted package."""
+    layout = tmp / RUNTIME_LAYOUT[runtime]
+    if not layout.is_dir():
+        # Fall back to canonical skills/ if the runtime layout is absent
+        # (older packages). Claude's canonical layout is skills/<id>/.
+        layout = tmp / "skills"
+    return layout
+
+
+def _find_agents_root() -> Optional[Path]:
+    """The repository root when inside a git work tree, else None."""
+    try:
+        import subprocess
+
+        out = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return Path(out.stdout.strip())
+    except Exception:
+        pass
+    return None
+
+
+def _write_agents_md(tmp: Path, pkg: Package) -> List[str]:
+    """Install AGENTS.md per the agents.md convention. Returns paths written.
+
+    Priority: repo-root AGENTS.md when inside a git work tree (append a
+    clearly delimited AgentScan section; never destroy existing content).
+    Otherwise no write — the caller prints where the file lives.
+    """
+    src = tmp / "AGENTS.md"
+    if not src.is_file():
+        return []
+    root = _find_agents_root()
+    if root is None:
+        return []
+    target = root / "AGENTS.md"
+    marker = f"<!-- agentscan:{pkg.id} -->"
+    try:
+        existing = target.read_text() if target.exists() else ""
+    except OSError:
+        return []
+    if marker in existing:
+        # Replace the previous section for this package.
+        start = existing.index(marker)
+        end = existing.index("<!-- /agentscan -->", start)
+        if end == -1:
+            end = len(existing)
+        else:
+            end += len("<!-- /agentscan -->")
+        new_section = f"{marker}\n\n{src.read_text()}\n\n<!-- /agentscan -->"
+        target.write_text(existing[:start].rstrip() + "\n\n" + new_section + "\n")
+    else:
+        section = f"\n{marker}\n\n{src.read_text()}\n\n<!-- /agentscan -->\n"
+        target.write_text(existing.rstrip() + "\n" + section)
+    return [str(target)]
+
+
+def install_layouts(tmp: Path, pkg: Package, runtimes: List[str]) -> InstallResult:
+    """Copy each requested runtime's skill layouts into place.
+
+    Returns an InstallResult with per-runtime destinations. Does not touch
+    installed.json — the CLI owns that bookkeeping.
+    """
+    result = InstallResult(pkg=pkg, runtimes=list(runtimes))
+    for runtime in runtimes:
+        dest_root = RUNTIME_DIRS[runtime]
+        layout = _layout_dir(tmp, runtime)
+        skills = [d for d in layout.iterdir() if (d / "SKILL.md").is_file()] if layout.is_dir() else []
+        if not skills:
+            raise InstallError(f"{pkg.id}: no skills found for runtime '{runtime}'")
+        for skill_dir in skills:
+            target = dest_root / skill_dir.name
+            if target.exists():
+                shutil.rmtree(target)
+            shutil.copytree(skill_dir, target)
+        result.dests[runtime] = dest_root
+    # AGENTS.md (agents.md convention) — repo root only.
+    result.agents_written = _write_agents_md(tmp, pkg)
+    return result
 
 
 def count_package(pkg_dir: Path):
-    """(skills, commands, knowledge, has_readme) from an installed package."""
+    """(skills, commands, knowledge, has_readme) from an extracted package dir.
+
+    Works on the canonical layout (skills/<id>/SKILL.md, commands/, knowledge/).
+    """
     skills_dir = pkg_dir / "skills"
     commands_dir = pkg_dir / "commands"
     knowledge_dir = pkg_dir / "knowledge"
@@ -161,22 +249,60 @@ def count_package(pkg_dir: Path):
     return skills, commands, knowledge, has_readme
 
 
-def install_package(client: Client, pkg: Package, progress=None) -> InstallResult:
-    """Download, verify, extract and install one package. Returns the result.
+def remove_package(pkg: Package, runtimes: List[str]) -> List[str]:
+    """Remove installed skill dirs for pkg across runtimes. Returns removed paths.
 
-    This is the combined form; the CLI drives the stages individually so it
-    can render progress between them.
+    Only removes the flattened per-runtime dirs (RUNTIME_DIRS[r] / <skill-id>).
+    Legacy nested installs (~/.claude/skills/<pkg>/skills/...) are left in
+    place — the CLI reports them and never deletes.
     """
+    removed: List[str] = []
+    tmp = Path(config.AGENTSCAN_DIR) / f"{pkg.id}.tmp"
+    if not tmp.exists():
+        # Need the skill list; reconstruct from the cache tarball if present.
+        cf = cache_path(pkg)
+        if cf.exists():
+            try:
+                tmp = extract_to_temp(cf, pkg)
+            except InstallError:
+                return removed
+        else:
+            return removed
+    try:
+        for runtime in runtimes:
+            layout = _layout_dir(tmp, runtime)
+            root = RUNTIME_DIRS[runtime]
+            for skill_dir in layout.iterdir() if layout.is_dir() else []:
+                if not (skill_dir / "SKILL.md").is_file():
+                    continue
+                target = root / skill_dir.name
+                if target.exists():
+                    shutil.rmtree(target)
+                    removed.append(str(target))
+    finally:
+        if tmp.exists() and tmp.name.endswith(".tmp"):
+            shutil.rmtree(tmp)
+    return removed
+
+
+def install_package(client: Client, pkg: Package, runtimes: List[str], progress=None) -> InstallResult:
+    """Download, verify, extract and install one package into runtimes."""
     config.ensure_dirs()
     cf = cache_path(pkg)
     if not cf.exists():
         client.download(pkg.id, cf, progress=progress)
     verify_checksum(cf, pkg)
     tmp = extract_to_temp(cf, pkg)
-    dest = commit_install(tmp, pkg)
-    skills, commands, knowledge, has_readme = count_package(dest)
-    return InstallResult(pkg=pkg, dest=dest, skills=skills, commands=commands,
-                         knowledge=knowledge, has_readme=has_readme)
+    try:
+        result = install_layouts(tmp, pkg, runtimes)
+        skills, commands, knowledge, has_readme = count_package(tmp)
+        result.skills = skills
+        result.commands = commands
+        result.knowledge = knowledge
+        result.has_readme = has_readme
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    return result
 
 
 def latest_installed_versions() -> Dict[str, str]:
@@ -187,5 +313,6 @@ def latest_installed_versions() -> Dict[str, str]:
 
 
 def installed_dir(package_id: str) -> Optional[Path]:
-    d = _install_dir_for(package_id)
+    """Legacy helper: the old nested install dir, if present."""
+    d = Path.home() / ".claude" / "skills" / package_id
     return d if d.exists() else None

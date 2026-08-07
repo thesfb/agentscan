@@ -10,6 +10,8 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
+import subprocess
 import tarfile
 import tempfile
 import unittest
@@ -171,8 +173,19 @@ class ConfigTest(unittest.TestCase):
 
     def test_installed_roundtrip(self):
         self.assertEqual(config.load_installed(), {})
-        config.save_installed({"security-engineer": "1.0.0"})
-        self.assertEqual(config.load_installed(), {"security-engineer": "1.0.0"})
+        config.save_installed({"security-engineer": {"version": "1.0.0", "runtimes": {}}})
+        self.assertEqual(
+            config.load_installed(),
+            {"security-engineer": {"version": "1.0.0", "runtimes": {}}},
+        )
+
+    def test_installed_v1_backward_compat(self):
+        """A bare {pkg: version} file (v1) loads as the v2 shape."""
+        config.INSTALLED_FILE.write_text('{"security-engineer": "1.0.0"}\n')
+        self.assertEqual(
+            config.load_installed(),
+            {"security-engineer": {"version": "1.0.0", "runtimes": {}}},
+        )
 
     def test_license_roundtrip(self):
         lic = License.from_dict({"license_key": "A", "customer": "B", "plan": "p", "expires_at": None})
@@ -245,6 +258,140 @@ class VerifyTest(unittest.TestCase):
         self.assertFalse(labels["Audit Passed"])
         # checksum provided but no cached tarball → not intact
         self.assertFalse(labels["Package Intact"])
+
+
+class RuntimeTest(unittest.TestCase):
+    """Runtime resolution + per-runtime layout installs."""
+
+    def setUp(self):
+        self._dir = tempfile.TemporaryDirectory()
+        self.root = Path(self._dir.name)
+
+    def tearDown(self):
+        self._dir.cleanup()
+
+    def test_resolve_auto_uses_detected(self):
+        from agentscan.runtimes import resolve_runtimes
+
+        self.assertEqual(resolve_runtimes(None, detected=["claude"]), ["claude"])
+        self.assertEqual(resolve_runtimes("auto", detected=["opencode"]), ["opencode"])
+        self.assertEqual(resolve_runtimes("all", detected=[]), ["claude", "opencode", "codex"])
+
+    def test_resolve_explicit_flag_wins(self):
+        from agentscan.runtimes import resolve_runtimes
+
+        # Explicit --runtime wins even if detection says absent.
+        self.assertEqual(resolve_runtimes("codex", detected=["claude"]), ["codex"])
+        self.assertEqual(resolve_runtimes("opencode", detected=[]), ["opencode"])
+
+    def test_resolve_unknown_flag_empty(self):
+        from agentscan.runtimes import resolve_runtimes
+
+        self.assertEqual(resolve_runtimes("bogus", detected=["claude"]), [])
+
+    def test_install_layouts_flattens_skills(self):
+        """Each runtime root gets <skill-id>/SKILL.md one level deep."""
+        import agentscan.installer as inst
+        from agentscan.runtimes import RUNTIMES
+
+        # Build a fake extracted package with per-runtime layouts.
+        pkg = make_pkg()
+        tmp = self.root / "pkg"
+        for runtime in ("claude", "opencode", "codex"):
+            layout = tmp / runtime / "skill-a"
+            layout.mkdir(parents=True)
+            (layout / "SKILL.md").write_text(
+                "---\nname: skill-a\ndescription: x\nlicense: MIT\n---\nbody\n"
+            )
+        (tmp / "AGENTS.md").write_text("---\nlicense: MIT\n---\n# setup\n")
+
+        # Point the installer at sandbox roots AND sandbox CWD so the
+        # AGENTS.md write cannot touch the real repository.
+        orig = inst.RUNTIME_DIRS
+        orig_cwd = Path.cwd()
+        inst.RUNTIME_DIRS = {
+            "claude": self.root / "claude-skills",
+            "opencode": self.root / "opencode-skills",
+            "codex": self.root / "agents-skills",
+        }
+        try:
+            fake_repo = self.root / "repo"
+            fake_repo.mkdir()
+            subprocess.run(["git", "init", "-q", str(fake_repo)], check=True)
+            os.chdir(fake_repo)
+            result = inst.install_layouts(tmp, pkg, list(RUNTIMES))
+            for runtime, root in inst.RUNTIME_DIRS.items():
+                self.assertTrue((root / "skill-a" / "SKILL.md").is_file(),
+                                f"{runtime} skill not flattened")
+            self.assertEqual(sorted(result.dests), ["claude", "codex", "opencode"])
+            self.assertTrue((fake_repo / "AGENTS.md").is_file())
+        finally:
+            os.chdir(orig_cwd)
+            inst.RUNTIME_DIRS = orig
+
+    def test_install_layouts_requires_skills(self):
+        import agentscan.installer as inst
+
+        pkg = make_pkg()
+        tmp = self.root / "pkg"
+        (tmp / "claude").mkdir(parents=True)
+        with self.assertRaises(InstallError):
+            inst.install_layouts(tmp, pkg, ["claude"])
+
+    def test_remove_package_only_flattened(self):
+        import agentscan.installer as inst
+
+        pkg = make_pkg()
+        tmp = self.root / "pkg"
+        layout = tmp / "claude" / "skill-a"
+        layout.mkdir(parents=True)
+        (layout / "SKILL.md").write_text(
+            "---\nname: skill-a\ndescription: x\nlicense: MIT\n---\nbody\n"
+        )
+        (tmp / "AGENTS.md").write_text("---\nlicense: MIT\n---\n# setup\n")
+
+        orig = inst.RUNTIME_DIRS
+        orig_cache = inst.cache_path
+        orig_cwd = Path.cwd()
+        inst.RUNTIME_DIRS = {"claude": self.root / "claude-skills", "opencode": self.root / "o", "codex": self.root / "c"}
+        inst.cache_path = lambda pkg: self.root / "pkg.tar.gz"
+        try:
+            # Sandbox CWD inside a fake git repo so _write_agents_md /
+            # _find_agents_root cannot touch the real repository.
+            fake_repo = self.root / "repo"
+            fake_repo.mkdir()
+            subprocess.run(["git", "init", "-q", str(fake_repo)], check=True)
+            os.chdir(fake_repo)
+
+            # Seed the cache with a tarball so remove can reconstruct skills.
+            import io as _io, tarfile as _tf
+
+            buf = _io.BytesIO()
+            with _tf.open(fileobj=buf, mode="w:gz") as tf:
+                for name, content in {
+                    "pkg/manifest.json": json.dumps({"id": "security-engineer", "version": "1.0.0"}),
+                    "pkg/claude/skill-a/SKILL.md": "---\nname: skill-a\ndescription: x\nlicense: MIT\n---\nbody\n",
+                    "pkg/AGENTS.md": "---\nlicense: MIT\n---\n# setup\n",
+                }.items():
+                    info = _tf.TarInfo(name)
+                    data = content.encode()
+                    info.size = len(data)
+                    tf.addfile(info, _io.BytesIO(data))
+            (self.root / "pkg.tar.gz").write_bytes(buf.getvalue())
+
+            # Install into claude, then remove only claude's flattened dir.
+            inst.install_layouts(tmp, pkg, ["claude"])
+            root = inst.RUNTIME_DIRS["claude"]
+            self.assertTrue((root / "skill-a").exists())
+            removed = inst.remove_package(pkg, ["claude"])
+            self.assertFalse((root / "skill-a").exists())
+            self.assertEqual(len(removed), 1)
+            # AGENTS.md must land in the fake repo, not the real one.
+            self.assertTrue((fake_repo / "AGENTS.md").is_file())
+        finally:
+            os.chdir(orig_cwd)
+            inst.RUNTIME_DIRS = orig
+            inst.cache_path = orig_cache
 
 
 if __name__ == "__main__":

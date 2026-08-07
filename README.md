@@ -118,7 +118,9 @@ agentscan-registry (private GitHub repo)
    └── GitHub Releases  tarball distribution
    ↓
 ~/.agentscan/  license · installed.json · config.json · cache/
-~/.claude/skills/<package>/  installed package
+~/.claude/skills/<skill-id>/            Claude Code install
+~/.config/opencode/skills/<skill-id>/   OpenCode install
+~/.agents/skills/<skill-id>/            Codex install (+ AGENTS.md at repo root)
 ```
 
 The website and API are the same Next.js application. No separate backend,
@@ -138,7 +140,8 @@ agentscan activate                  # prompt for license → verify → store
 agentscan logout                    # remove local license
 agentscan whoami                    # show active license
 agentscan search                    # browse the catalog (package cards)
-agentscan install <package>         # verified install into Claude Code
+agentscan install <package>         # verified install, runtime auto-detected
+agentscan install <p> --runtime codex   # install into a specific runtime
 agentscan update                    # upgrade installed packages
 agentscan verify                    # signature · latest · audit · intact
 ```
@@ -153,6 +156,32 @@ agentscan install security
 agentscan install secuirty        # typos are suggested, not silent
 ```
 
+### Runtimes
+
+Packages install into the agent runtimes found on your machine:
+
+| Runtime      | Detected via            | Skills install to                  |
+|--------------|-------------------------|------------------------------------|
+| Claude Code  | `~/.claude` or `claude` | `~/.claude/skills/<skill-id>/`     |
+| OpenCode     | `~/.config/opencode` or `opencode` | `~/.config/opencode/skills/<skill-id>/` |
+| OpenAI Codex | `~/.codex`, `~/.agents`, or `codex` | `~/.agents/skills/<skill-id>/` + AGENTS.md |
+
+`agentscan install` detects installed runtimes automatically. When several
+are present it installs into all of them; when none are detected it prompts,
+or you can pick explicitly:
+
+```bash
+agentscan install security-engineer --runtime claude
+agentscan install security-engineer --runtime opencode
+agentscan install security-engineer --runtime codex
+agentscan install security-engineer --runtime all
+```
+
+Codex installs also write the package's `AGENTS.md` (the agents.md
+convention) to the repository root when you are inside a git work tree. The
+file is marked with a `<!-- agentscan:<package> -->` comment; reinstalling
+replaces that section, and the rest of your AGENTS.md is left untouched.
+
 Add `--quiet` (or `-q`) to suppress progress lines for automation; results
 and errors still print. Run `agentscan --help` for examples.
 
@@ -163,7 +192,7 @@ Everything lives in `~/.agentscan/`:
 ```
 ~/.agentscan/
   license          the activated license (JSON)
-  installed.json   {package-id: version}
+  installed.json   {package-id: {version, runtimes: {runtime: {skills: [...]}}}}
   config.json      api_url override (optional)
   cache/           downloaded tarballs
 ```

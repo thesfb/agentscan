@@ -14,17 +14,48 @@ Each check returns (label, ok, detail). Nothing here executes package code.
 from __future__ import annotations
 
 import json
+import tarfile
 from pathlib import Path
 from typing import List, Optional, Tuple
 
 from .api import Client
 from .config import CACHE_DIR
-from .installer import installed_dir
 from .models import Package
 
 Check = Tuple[str, bool, str]
 
 MOCK_SIGNATURE_MARKER = "signature.sig"
+
+
+def _package_root_from_cache(pkg: Package) -> Optional[Path]:
+    """Extract the cached tarball to a temp dir and return its root.
+
+    The tarball contains the package metadata (audit.json, signature.sig)
+    that verify needs — those files are not installed into runtime skill
+    dirs. Returns None when the tarball is missing or unreadable.
+    """
+    tarball = CACHE_DIR / pkg.asset
+    if not tarball.exists():
+        return None
+    import tempfile
+
+    tmp = Path(tempfile.mkdtemp(prefix="agentscan-verify-"))
+    try:
+        with tarfile.open(tarball, "r:gz") as tf:
+            members = tf.getmembers()
+            top = next((m.name.split("/")[0] for m in members if "/" in m.name), None)
+            for member in members:
+                name = member.name
+                if top and (name == top or name.startswith(top + "/")):
+                    member.name = name[len(top):].lstrip("/")
+                    if member.name:
+                        tf.extract(member, tmp)
+        return tmp
+    except (tarfile.TarError, OSError):
+        import shutil
+
+        shutil.rmtree(tmp, ignore_errors=True)
+        return None
 
 
 def _audit_ok(pkg_dir: Path) -> Tuple[bool, str]:
@@ -42,12 +73,15 @@ def _audit_ok(pkg_dir: Path) -> Tuple[bool, str]:
 
 def verify_package(pkg: Package, installed_version: str, client: Client) -> List[Check]:
     checks: List[Check] = []
-    pkg_dir = installed_dir(pkg.id)
+
+    # Package metadata (audit.json, signature.sig) comes from the cached
+    # tarball — the canonical artifact. Runtime skill dirs hold copies.
+    pkg_root = _package_root_from_cache(pkg)
 
     # Signature — placeholder for real cryptographic verification.
-    if pkg_dir is not None and (pkg_dir / MOCK_SIGNATURE_MARKER).exists():
+    if pkg_root is not None and (pkg_root / MOCK_SIGNATURE_MARKER).exists():
         checks.append(("Signature Valid", True, "signature present (verification pending)"))
-    elif pkg_dir is not None:
+    elif pkg_root is not None:
         checks.append(("Signature Valid", False, "signature.sig missing"))
     else:
         checks.append(("Signature Valid", False, "package not installed"))
@@ -68,8 +102,8 @@ def verify_package(pkg: Package, installed_version: str, client: Client) -> List
         )
 
     # Audit.
-    if pkg_dir is not None:
-        ok, detail = _audit_ok(pkg_dir)
+    if pkg_root is not None:
+        ok, detail = _audit_ok(pkg_root)
         checks.append(("Audit Passed", ok, detail))
     else:
         checks.append(("Audit Passed", False, "package not installed"))

@@ -84,18 +84,29 @@ def clear_license() -> None:
 
 
 # --------------------------------------------------------------------------
-# installed.json — {package-id: version}
+# installed.json — {package-id: {version, runtimes: {runtime: {skills: [...]}}}}
 # --------------------------------------------------------------------------
 
 
-def load_installed() -> Dict[str, str]:
+def load_installed() -> Dict[str, dict]:
+    """Load installed.json. Returns {pkg-id: {"version": str, "runtimes": {...}}}.
+
+    Backward compatible: a bare {pkg-id: version} map (v1) is upgraded in
+    memory to the v2 shape with an empty runtimes record.
+    """
     try:
         data = json.loads(INSTALLED_FILE.read_text())
-        return {k: str(v) for k, v in data.items()}
     except (OSError, ValueError):
         return {}
+    out: Dict[str, dict] = {}
+    for k, v in data.items():
+        if isinstance(v, dict):
+            out[k] = v
+        else:
+            out[k] = {"version": str(v), "runtimes": {}}
+    return out
 
 
-def save_installed(installed: Dict[str, str]) -> None:
+def save_installed(installed: Dict[str, dict]) -> None:
     ensure_dirs()
     INSTALLED_FILE.write_text(json.dumps(installed, indent=2, sort_keys=True) + "\n")

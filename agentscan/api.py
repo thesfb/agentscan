@@ -19,6 +19,7 @@ print a clean failure instead of a traceback.
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -28,7 +29,10 @@ from .models import Catalog, License, Package
 
 DEFAULT_TIMEOUT = 30
 
-POLAR_VALIDATE_URL = "https://api.polar.sh/v1/customer-portal/license-keys/validate"
+POLAR_VALIDATE_URL = os.environ.get(
+    "AGENTSCAN_POLAR_VALIDATE_URL",
+    "https://api.polar.sh/v1/customer-portal/license-keys/validate",
+)
 
 
 class ApiError(Exception):
