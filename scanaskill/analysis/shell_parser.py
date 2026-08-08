@@ -285,7 +285,7 @@ def arg_scope(arg):
         rest = arg[1:]
         if rest.startswith("{"):
             rest = rest[1:]
-        name = re.split(r"[/}.]", rest, 1)[0]  # var name up to path sep
+        name = re.split(r"[/}.]", rest, maxsplit=1)[0]  # var name up to path sep
         if name in ("HOME", "USER", "LOGNAME", "SHELL"):
             return "home", name
         if name in ("TMPDIR", "TMP", "TEMP"):
