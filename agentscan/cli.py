@@ -418,7 +418,7 @@ def cmd_install(query: str, runtime_flag: Optional[str] = None) -> int:
         detected = detect_installed()
         if not detected:
             warn("no supported agent runtime detected on this machine")
-            info("pass --runtime claude|opencode|codex to choose one")
+            info("pass --runtime claude|opencode|codex|hermes to choose one")
             return 1
         runtimes_ = prompt_for_runtime()
         if not runtimes_:
@@ -562,7 +562,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser(
         "install",
-        help="install a package into Claude Code, OpenCode, or Codex",
+        help="install a package into Claude Code, OpenCode, Codex, or Hermes",
         parents=[common],
     )
     sp.add_argument("package", nargs="+", metavar="<package>",

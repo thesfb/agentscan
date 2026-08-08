@@ -121,6 +121,7 @@ agentscan-registry (private GitHub repo)
 ~/.claude/skills/<skill-id>/            Claude Code install
 ~/.config/opencode/skills/<skill-id>/   OpenCode install
 ~/.agents/skills/<skill-id>/            Codex install (+ AGENTS.md at repo root)
+~/.hermes/skills/<skill-id>/            Hermes install ($HERMES_HOME honored)
 ```
 
 The website and API are the same Next.js application. No separate backend,
@@ -165,6 +166,7 @@ Packages install into the agent runtimes found on your machine:
 | Claude Code  | `~/.claude` or `claude` | `~/.claude/skills/<skill-id>/`     |
 | OpenCode     | `~/.config/opencode` or `opencode` | `~/.config/opencode/skills/<skill-id>/` |
 | OpenAI Codex | `~/.codex`, `~/.agents`, or `codex` | `~/.agents/skills/<skill-id>/` + AGENTS.md |
+| Hermes       | `$HERMES_HOME`, `~/.hermes`, or `hermes` | `$HERMES_HOME/skills/<skill-id>/` (default `~/.hermes/skills/`) |
 
 `agentscan install` detects installed runtimes automatically. When several
 are present it installs into all of them; when none are detected it prompts,
@@ -174,8 +176,14 @@ or you can pick explicitly:
 agentscan install security-engineer --runtime claude
 agentscan install security-engineer --runtime opencode
 agentscan install security-engineer --runtime codex
+agentscan install security-engineer --runtime hermes
 agentscan install security-engineer --runtime all
 ```
+
+Hermes follows the agentskills.io open standard: skills are discovered
+recursively under its skills root and load as slash commands (`/skill-name`).
+`HERMES_HOME` is the official override and is honored when set (it also
+covers named profiles).
 
 Codex installs also write the package's `AGENTS.md` (the agents.md
 convention) to the repository root when you are inside a git work tree. The

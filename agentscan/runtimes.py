@@ -8,6 +8,12 @@ exists or its CLI binary is on PATH.
     claude   → ~/.claude/skills  (or `claude` on PATH)
     opencode → ~/.config/opencode (or `opencode` on PATH)
     codex    → ~/.codex or ~/.agents (or `codex` on PATH)
+    hermes   → $HERMES_HOME or ~/.hermes (or `hermes` on PATH)
+
+Hermes note: the skills directory is $HERMES_HOME/skills when HERMES_HOME
+is set (profiles included), else ~/.hermes/skills. Detection treats
+HERMES_HOME as authoritative when present (verified against the Hermes
+docs: hermes-agent.nousresearch.com/docs).
 """
 
 from __future__ import annotations
@@ -18,6 +24,19 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 # Official per-runtime config/state dirs (presence ⇒ installed).
+
+
+def hermes_home_dir() -> Path:
+    """The Hermes home directory: $HERMES_HOME when set, else ~/.hermes.
+
+    HERMES_HOME is the official override (docs: hermes-agent.nousresearch
+    .com/docs) and also covers named profiles, which use
+    $HERMES_HOME/profiles/<name>/ with the same layout.
+    """
+    env = os.environ.get("HERMES_HOME", "").strip()
+    return Path(env) if env else Path.home() / ".hermes"
+
+
 _DETECT_DIRS: Dict[str, List[Path]] = {
     "claude": [Path.home() / ".claude"],
     "opencode": [
@@ -25,15 +44,17 @@ _DETECT_DIRS: Dict[str, List[Path]] = {
         Path.home() / ".local" / "share" / "opencode",
     ],
     "codex": [Path.home() / ".codex", Path.home() / ".agents"],
+    "hermes": [hermes_home_dir()],
 }
 
 _DETECT_BINS: Dict[str, List[str]] = {
     "claude": ["claude"],
     "opencode": ["opencode"],
     "codex": ["codex"],
+    "hermes": ["hermes"],
 }
 
-RUNTIMES = ("claude", "opencode", "codex")
+RUNTIMES = ("claude", "opencode", "codex", "hermes")
 
 
 def detect_runtimes() -> Dict[str, bool]:

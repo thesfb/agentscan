@@ -12,6 +12,7 @@ import io
 import json
 import os
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -21,6 +22,10 @@ from agentscan import config
 from agentscan.installer import InstallError, _extract, _sha256
 from agentscan.models import Catalog, License, Package, normalize_name
 from agentscan.verify import verify_package
+
+# Repo root (tests/..): used to put the package on sys.path in subprocess
+# probes so a fresh interpreter imports the same source tree.
+ROOT_SRC = str(Path(__file__).resolve().parent.parent)
 
 
 def make_pkg(**overrides) -> Package:
@@ -275,7 +280,10 @@ class RuntimeTest(unittest.TestCase):
 
         self.assertEqual(resolve_runtimes(None, detected=["claude"]), ["claude"])
         self.assertEqual(resolve_runtimes("auto", detected=["opencode"]), ["opencode"])
-        self.assertEqual(resolve_runtimes("all", detected=[]), ["claude", "opencode", "codex"])
+        self.assertEqual(
+            resolve_runtimes("all", detected=[]),
+            ["claude", "opencode", "codex", "hermes"],
+        )
 
     def test_resolve_explicit_flag_wins(self):
         from agentscan.runtimes import resolve_runtimes
@@ -283,11 +291,45 @@ class RuntimeTest(unittest.TestCase):
         # Explicit --runtime wins even if detection says absent.
         self.assertEqual(resolve_runtimes("codex", detected=["claude"]), ["codex"])
         self.assertEqual(resolve_runtimes("opencode", detected=[]), ["opencode"])
+        self.assertEqual(resolve_runtimes("hermes", detected=["claude"]), ["hermes"])
 
     def test_resolve_unknown_flag_empty(self):
         from agentscan.runtimes import resolve_runtimes
 
         self.assertEqual(resolve_runtimes("bogus", detected=["claude"]), [])
+
+    def test_hermes_home_override_and_detection(self):
+        """HERMES_HOME is the official skills-root override; detection
+        must honor it (Hermes docs: hermes-agent.nousresearch.com/docs).
+
+        RUNTIME_DIRS is resolved at import time (the CLI is a fresh process
+        per run), so the env-var coupling is asserted in a subprocess with
+        HERMES_HOME set — the same conditions a real install runs under.
+        """
+        import agentscan.runtimes as rt
+        from agentscan.installer import RUNTIME_DIRS
+
+        # Default (no override): ~/.hermes, and the skills root derives from it.
+        self.assertEqual(rt.hermes_home_dir(), Path.home() / ".hermes")
+        self.assertEqual(RUNTIME_DIRS["hermes"], Path.home() / ".hermes" / "skills")
+
+        # Detection reports hermes when the dir exists.
+        found = rt.detect_runtimes()
+        self.assertIn("hermes", found)
+
+        # Env override at process start drives the import-time resolution.
+        probe = (
+            "import sys; sys.path.insert(0, %r); "
+            "from agentscan.installer import RUNTIME_DIRS; "
+            "print(RUNTIME_DIRS['hermes'])" % str(ROOT_SRC)
+        )
+        env = dict(os.environ, HERMES_HOME="/tmp/hermes-custom")
+        r = subprocess.run(
+            [sys.executable, "-c", probe], capture_output=True, text=True,
+            env=env, timeout=60,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "/tmp/hermes-custom/skills")
 
     def test_install_layouts_flattens_skills(self):
         """Each runtime root gets <skill-id>/SKILL.md one level deep."""
@@ -297,7 +339,7 @@ class RuntimeTest(unittest.TestCase):
         # Build a fake extracted package with per-runtime layouts.
         pkg = make_pkg()
         tmp = self.root / "pkg"
-        for runtime in ("claude", "opencode", "codex"):
+        for runtime in ("claude", "opencode", "codex", "hermes"):
             layout = tmp / runtime / "skill-a"
             layout.mkdir(parents=True)
             (layout / "SKILL.md").write_text(
@@ -313,6 +355,7 @@ class RuntimeTest(unittest.TestCase):
             "claude": self.root / "claude-skills",
             "opencode": self.root / "opencode-skills",
             "codex": self.root / "agents-skills",
+            "hermes": self.root / "hermes-skills",
         }
         try:
             fake_repo = self.root / "repo"
@@ -323,7 +366,9 @@ class RuntimeTest(unittest.TestCase):
             for runtime, root in inst.RUNTIME_DIRS.items():
                 self.assertTrue((root / "skill-a" / "SKILL.md").is_file(),
                                 f"{runtime} skill not flattened")
-            self.assertEqual(sorted(result.dests), ["claude", "codex", "opencode"])
+            self.assertEqual(
+                sorted(result.dests), ["claude", "codex", "hermes", "opencode"]
+            )
             self.assertTrue((fake_repo / "AGENTS.md").is_file())
         finally:
             os.chdir(orig_cwd)
@@ -353,7 +398,12 @@ class RuntimeTest(unittest.TestCase):
         orig = inst.RUNTIME_DIRS
         orig_cache = inst.cache_path
         orig_cwd = Path.cwd()
-        inst.RUNTIME_DIRS = {"claude": self.root / "claude-skills", "opencode": self.root / "o", "codex": self.root / "c"}
+        inst.RUNTIME_DIRS = {
+            "claude": self.root / "claude-skills",
+            "opencode": self.root / "o",
+            "codex": self.root / "c",
+            "hermes": self.root / "h",
+        }
         inst.cache_path = lambda pkg: self.root / "pkg.tar.gz"
         try:
             # Sandbox CWD inside a fake git repo so _write_agents_md /

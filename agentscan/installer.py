@@ -1,13 +1,19 @@
 """Package installer: download → checksum → extract → install into runtimes.
 
 The package tarball contains canonical `skills/<id>/SKILL.md` plus generated
-per-runtime layouts (`claude/`, `opencode/`, `codex/`) and an `AGENTS.md`
-for the agents.md convention. The installer copies each skill into the
-selected runtime's skills directory, flattened one level:
+per-runtime layouts (`claude/`, `opencode/`, `codex/`, `hermes/`) and an
+`AGENTS.md` for the agents.md convention. The installer copies each skill
+into the selected runtime's skills directory, flattened one level:
 
     claude   → ~/.claude/skills/<skill-id>/
     opencode → ~/.config/opencode/skills/<skill-id>/
     codex    → ~/.agents/skills/<skill-id>/   (+ AGENTS.md to repo root)
+    hermes   → $HERMES_HOME/skills/<skill-id>/  (default ~/.hermes/skills)
+
+Hermes discovery is recursive under its skills root and follows the
+agentskills.io open standard, so the same flat one-level layout that the
+other runtimes use is also the correct Hermes layout — no nested package
+directory (nested installs were invisible to every runtime).
 
 The flow is split into stages so the CLI can show progress per stage:
 
@@ -36,19 +42,39 @@ from . import config
 from .models import Package
 
 # Official runtime discovery roots (verified against runtime docs 2026-08).
+
+
+def _hermes_skills_dir() -> Path:
+    """$HERMES_HOME/skills when HERMES_HOME is set, else ~/.hermes/skills.
+
+    Hermes skills root honors $HERMES_HOME (official override; covers
+    named profiles too), falling back to ~/.hermes/skills.
+    """
+    from .runtimes import hermes_home_dir
+
+    return hermes_home_dir() / "skills"
+
+
 RUNTIME_DIRS: Dict[str, Path] = {
     "claude": Path.home() / ".claude" / "skills",
     "opencode": Path.home() / ".config" / "opencode" / "skills",
     "codex": Path.home() / ".agents" / "skills",
+    "hermes": _hermes_skills_dir(),
 }
 
 # Layout subdir inside the package tarball per runtime.
-RUNTIME_LAYOUT = {"claude": "claude", "opencode": "opencode", "codex": "codex"}
+RUNTIME_LAYOUT = {
+    "claude": "claude",
+    "opencode": "opencode",
+    "codex": "codex",
+    "hermes": "hermes",
+}
 
 RUNTIME_NAMES = {
     "claude": "Claude Code",
     "opencode": "OpenCode",
     "codex": "OpenAI Codex",
+    "hermes": "Hermes",
 }
 
 
