@@ -5,4 +5,4 @@ this package adds the paid-product surface: license activation, package
 catalog, install/update/verify. Everything is stdlib-only.
 """
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"

@@ -9,6 +9,7 @@ Commands:
     agentscan search                 browse the catalog
     agentscan install <package>      install a package (auto-detect runtime)
     agentscan install <p> --runtime codex   install into a specific runtime
+    agentscan install <p> --runtime grok    install into Grok Build
     agentscan update                 update installed packages
     agentscan verify                 verify installed packages
 
@@ -418,7 +419,7 @@ def cmd_install(query: str, runtime_flag: Optional[str] = None) -> int:
         detected = detect_installed()
         if not detected:
             warn("no supported agent runtime detected on this machine")
-            info("pass --runtime claude|opencode|codex|hermes to choose one")
+            info("pass --runtime claude|opencode|codex|hermes|grok to choose one")
             return 1
         runtimes_ = prompt_for_runtime()
         if not runtimes_:
@@ -562,13 +563,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser(
         "install",
-        help="install a package into Claude Code, OpenCode, Codex, or Hermes",
+        help="install a package into Claude Code, OpenCode, Codex, Hermes, or Grok Build",
         parents=[common],
     )
     sp.add_argument("package", nargs="+", metavar="<package>",
                     help="package id, title, or any unambiguous prefix")
     sp.add_argument(
-        "--runtime", default=None, metavar="claude|opencode|codex|all",
+        "--runtime", default=None, metavar="claude|opencode|codex|hermes|grok|all",
         help="target runtime (default: auto-detect installed runtimes)",
     )
 

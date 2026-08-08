@@ -1,19 +1,25 @@
 """Package installer: download → checksum → extract → install into runtimes.
 
 The package tarball contains canonical `skills/<id>/SKILL.md` plus generated
-per-runtime layouts (`claude/`, `opencode/`, `codex/`, `hermes/`) and an
-`AGENTS.md` for the agents.md convention. The installer copies each skill
-into the selected runtime's skills directory, flattened one level:
+per-runtime layouts (`claude/`, `opencode/`, `codex/`, `hermes/`, `grok/`)
+and an `AGENTS.md` for the agents.md convention. The installer copies each
+skill into the selected runtime's skills directory, flattened one level:
 
     claude   → ~/.claude/skills/<skill-id>/
     opencode → ~/.config/opencode/skills/<skill-id>/
     codex    → ~/.agents/skills/<skill-id>/   (+ AGENTS.md to repo root)
     hermes   → $HERMES_HOME/skills/<skill-id>/  (default ~/.hermes/skills)
+    grok     → $GROK_HOME/skills/<skill-id>/    (default ~/.grok/skills)
 
 Hermes discovery is recursive under its skills root and follows the
 agentskills.io open standard, so the same flat one-level layout that the
 other runtimes use is also the correct Hermes layout — no nested package
 directory (nested installs were invisible to every runtime).
+
+Grok Build (xAI) reads the same agentskills.io SKILL.md standard and
+discovers skills recursively under skills/ dirs (cwd/.grok/skills,
+~/.grok/skills, ~/.agents/skills, ~/.claude/skills); $GROK_HOME overrides
+the home. The flat one-level layout is the native install shape.
 
 The flow is split into stages so the CLI can show progress per stage:
 
@@ -55,11 +61,24 @@ def _hermes_skills_dir() -> Path:
     return hermes_home_dir() / "skills"
 
 
+def _grok_skills_dir() -> Path:
+    """$GROK_HOME/skills when GROK_HOME is set, else ~/.grok/skills.
+
+    Grok Build's native user-level skills directory (verified in the
+    grok-build source: skills are discovered under <grok-home>/skills,
+    and GROK_HOME overrides the home like HERMES_HOME does for Hermes).
+    """
+    from .runtimes import grok_home_dir
+
+    return grok_home_dir() / "skills"
+
+
 RUNTIME_DIRS: Dict[str, Path] = {
     "claude": Path.home() / ".claude" / "skills",
     "opencode": Path.home() / ".config" / "opencode" / "skills",
     "codex": Path.home() / ".agents" / "skills",
     "hermes": _hermes_skills_dir(),
+    "grok": _grok_skills_dir(),
 }
 
 # Layout subdir inside the package tarball per runtime.
@@ -68,6 +87,7 @@ RUNTIME_LAYOUT = {
     "opencode": "opencode",
     "codex": "codex",
     "hermes": "hermes",
+    "grok": "grok",
 }
 
 RUNTIME_NAMES = {
@@ -75,6 +95,7 @@ RUNTIME_NAMES = {
     "opencode": "OpenCode",
     "codex": "OpenAI Codex",
     "hermes": "Hermes",
+    "grok": "Grok Build",
 }
 
 

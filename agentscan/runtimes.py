@@ -9,11 +9,18 @@ exists or its CLI binary is on PATH.
     opencode → ~/.config/opencode (or `opencode` on PATH)
     codex    → ~/.codex or ~/.agents (or `codex` on PATH)
     hermes   → $HERMES_HOME or ~/.hermes (or `hermes` on PATH)
+    grok     → $GROK_HOME or ~/.grok (or `grok` on PATH)
 
 Hermes note: the skills directory is $HERMES_HOME/skills when HERMES_HOME
 is set (profiles included), else ~/.hermes/skills. Detection treats
 HERMES_HOME as authoritative when present (verified against the Hermes
 docs: hermes-agent.nousresearch.com/docs).
+
+Grok Build note: the config home is $GROK_HOME when set, else ~/.grok
+(verified in the grok-build source: xai_grok_config::user_grok_home and
+the @xai-official/grok npm launcher, "matching the Rust grok_home()").
+Skills live under <home>/skills. Grok also reads ~/.agents/skills and
+~/.claude/skills natively, but the native install target is grok's own.
 """
 
 from __future__ import annotations
@@ -37,6 +44,18 @@ def hermes_home_dir() -> Path:
     return Path(env) if env else Path.home() / ".hermes"
 
 
+def grok_home_dir() -> Path:
+    """The Grok Build home directory: $GROK_HOME when set, else ~/.grok.
+
+    GROK_HOME is the official override (verified in the grok-build source:
+    xai_grok_config::user_grok_home, and the @xai-official/grok npm
+    launcher's postinstall, which resolves $GROK_HOME "matching the Rust
+    grok_home()"). Skills live under <home>/skills.
+    """
+    env = os.environ.get("GROK_HOME", "").strip()
+    return Path(env) if env else Path.home() / ".grok"
+
+
 _DETECT_DIRS: Dict[str, List[Path]] = {
     "claude": [Path.home() / ".claude"],
     "opencode": [
@@ -45,6 +64,7 @@ _DETECT_DIRS: Dict[str, List[Path]] = {
     ],
     "codex": [Path.home() / ".codex", Path.home() / ".agents"],
     "hermes": [hermes_home_dir()],
+    "grok": [grok_home_dir()],
 }
 
 _DETECT_BINS: Dict[str, List[str]] = {
@@ -52,9 +72,10 @@ _DETECT_BINS: Dict[str, List[str]] = {
     "opencode": ["opencode"],
     "codex": ["codex"],
     "hermes": ["hermes"],
+    "grok": ["grok"],
 }
 
-RUNTIMES = ("claude", "opencode", "codex", "hermes")
+RUNTIMES = ("claude", "opencode", "codex", "hermes", "grok")
 
 
 def detect_runtimes() -> Dict[str, bool]:

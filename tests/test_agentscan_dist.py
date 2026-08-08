@@ -282,7 +282,7 @@ class RuntimeTest(unittest.TestCase):
         self.assertEqual(resolve_runtimes("auto", detected=["opencode"]), ["opencode"])
         self.assertEqual(
             resolve_runtimes("all", detected=[]),
-            ["claude", "opencode", "codex", "hermes"],
+            ["claude", "opencode", "codex", "hermes", "grok"],
         )
 
     def test_resolve_explicit_flag_wins(self):
@@ -292,6 +292,7 @@ class RuntimeTest(unittest.TestCase):
         self.assertEqual(resolve_runtimes("codex", detected=["claude"]), ["codex"])
         self.assertEqual(resolve_runtimes("opencode", detected=[]), ["opencode"])
         self.assertEqual(resolve_runtimes("hermes", detected=["claude"]), ["hermes"])
+        self.assertEqual(resolve_runtimes("grok", detected=["claude"]), ["grok"])
 
     def test_resolve_unknown_flag_empty(self):
         from agentscan.runtimes import resolve_runtimes
@@ -331,6 +332,40 @@ class RuntimeTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(r.stdout.strip(), "/tmp/hermes-custom/skills")
 
+    def test_grok_home_override_and_detection(self):
+        """GROK_HOME is the official Grok Build home override; detection
+        and the installer must honor it.
+
+        Verified in the grok-build source (xai_grok_config::user_grok_home)
+        and the @xai-official/grok npm launcher. RUNTIME_DIRS resolves at
+        import time (fresh process per CLI run), so the env coupling is
+        asserted in a subprocess, same as the Hermes probe.
+        """
+        import agentscan.runtimes as rt
+        from agentscan.installer import RUNTIME_DIRS
+
+        # Default (no override): ~/.grok.
+        self.assertEqual(rt.grok_home_dir(), Path.home() / ".grok")
+        self.assertEqual(RUNTIME_DIRS["grok"], Path.home() / ".grok" / "skills")
+
+        # Detection reports grok when the dir exists or binary is on PATH.
+        found = rt.detect_runtimes()
+        self.assertIn("grok", found)
+
+        # Env override at process start drives the import-time resolution.
+        probe = (
+            "import sys; sys.path.insert(0, %r); "
+            "from agentscan.installer import RUNTIME_DIRS; "
+            "print(RUNTIME_DIRS['grok'])" % str(ROOT_SRC)
+        )
+        env = dict(os.environ, GROK_HOME="/tmp/grok-custom")
+        r = subprocess.run(
+            [sys.executable, "-c", probe], capture_output=True, text=True,
+            env=env, timeout=60,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "/tmp/grok-custom/skills")
+
     def test_install_layouts_flattens_skills(self):
         """Each runtime root gets <skill-id>/SKILL.md one level deep."""
         import agentscan.installer as inst
@@ -339,7 +374,7 @@ class RuntimeTest(unittest.TestCase):
         # Build a fake extracted package with per-runtime layouts.
         pkg = make_pkg()
         tmp = self.root / "pkg"
-        for runtime in ("claude", "opencode", "codex", "hermes"):
+        for runtime in ("claude", "opencode", "codex", "hermes", "grok"):
             layout = tmp / runtime / "skill-a"
             layout.mkdir(parents=True)
             (layout / "SKILL.md").write_text(
@@ -356,6 +391,7 @@ class RuntimeTest(unittest.TestCase):
             "opencode": self.root / "opencode-skills",
             "codex": self.root / "agents-skills",
             "hermes": self.root / "hermes-skills",
+            "grok": self.root / "grok-skills",
         }
         try:
             fake_repo = self.root / "repo"
@@ -367,7 +403,8 @@ class RuntimeTest(unittest.TestCase):
                 self.assertTrue((root / "skill-a" / "SKILL.md").is_file(),
                                 f"{runtime} skill not flattened")
             self.assertEqual(
-                sorted(result.dests), ["claude", "codex", "hermes", "opencode"]
+                sorted(result.dests),
+                ["claude", "codex", "grok", "hermes", "opencode"],
             )
             self.assertTrue((fake_repo / "AGENTS.md").is_file())
         finally:
@@ -403,6 +440,7 @@ class RuntimeTest(unittest.TestCase):
             "opencode": self.root / "o",
             "codex": self.root / "c",
             "hermes": self.root / "h",
+            "grok": self.root / "g",
         }
         inst.cache_path = lambda pkg: self.root / "pkg.tar.gz"
         try:
