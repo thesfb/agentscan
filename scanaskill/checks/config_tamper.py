@@ -14,7 +14,7 @@ import json
 import os
 import re
 
-from ..common import read_lines
+from ..common import PIPE_SHELL_RX, read_lines
 
 NAME = "config_tamper"
 TITLE = "Agent configuration entry points"
@@ -33,12 +33,57 @@ CONFIG_FILES = {
 }
 
 REMOTE_MCP_URL = re.compile(r'"(?:url|transport_url)"\s*:\s*"https?://')
-MCP_COMMAND = re.compile(r'"(?:command|cmd)"\s*:\s*"[^\"]+"')
-HOOK_COMMAND = re.compile(r'"(?:command|script)"\s*:\s*"[^\"]+"')
+MCP_COMMAND = re.compile(r'"(?:command|cmd)"\s*:\s*"[^\\"]+"')
+HOOK_COMMAND = re.compile(r'"(?:command|script)"\s*:\s*"[^\\"]+"')
 DENY_EMPTY = re.compile(r'"deny"\s*:\s*\[\s*\]')
-LIFECYCLE_KEY = re.compile(r'"(?:preinstall|postinstall|prepare|prepublishOnly)"\s*:\s*"([^\"]+)"')
-PIPE_SHELL = re.compile(r"\b(?:curl|wget)\b[^\n]*\|\s*(?:sudo\s+)?(?:ba)?sh\b")
+LIFECYCLE_KEY = re.compile(r'"(?:preinstall|postinstall|prepare|prepublishOnly)"\s*:\s*"([^\\"]+)"')
+PIPE_SHELL = PIPE_SHELL_RX
 WORKFLOW_RUN = re.compile(r"^\s*run\s*:\s*(.+)$")
+
+# v3 (FN9): lifecycle-script content analysis — network primitives and
+# sensitive reads inside npm lifecycle script strings.
+_LIFECYCLE_NET = re.compile(
+    r"\b(?:fetch\s*\(|https?\.(?:get|post|request)\b|require\(['\"](?:https?|http|net|child_process|axios)"
+    r"|axios\.|got\s*\(|node-fetch|XMLHttpRequest|WebSocket)",
+    re.IGNORECASE,
+)
+_LIFECYCLE_READ = re.compile(
+    r"\b(?:readFileSync|readFile)\s*\(|process\.env"
+    r"|['\"](?:[^'\"]*\.env|/home/[^'\"]*|~?/\.ssh|~?/\.aws|~?/\.git-credentials|~?/\.netrc)['\"]",
+    re.IGNORECASE,
+)
+
+# v2: MCP tool-description poisoning (CVE-2025-54136 shape).
+# A tool description that pairs file/credential reads with send/upload
+# verbs is instruction content that will land in the model's context —
+# the MSRC/ghostprobe "lethal trifecta": execution + exfiltration +
+# credential-adjacent paths inside a description.
+_POISON_READ = re.compile(
+    r"\b(?:read|open|cat|get|fetch|load|access|collect|copy|exfiltrat\w*)\b"
+    r"[^\n]{0,40}?(?:~/?\.ssh|\.env\b|credentials?|id_rsa|id_ed25519|"
+    r"\.aws|\.git-credentials|\.netrc|/etc/(?:passwd|shadow)|secret|token|key)",
+    re.IGNORECASE,
+)
+_POISON_SEND = re.compile(
+    r"\b(?:send|upload|post|pass|forward|transmit|deliver|exfiltrat\w*)\b"
+    r"[^\n]{0,40}?(?:to|as|via|using|through|in)",
+    re.IGNORECASE,
+)
+_POISON_APPEND = re.compile(
+    r"\b(?:as the|as a|in the|in a|to the|to a|parameter|argument|note|"
+    r"field|body|request|endpoint|url|server)\b",
+    re.IGNORECASE,
+)
+
+# v3 (FN10): generic user-file reads paired with transfer — lower
+# confidence, review queue (credentials stay at 0.7).
+_POISON_READ_GENERIC = re.compile(
+    r"\b(?:read|open|cat|get|fetch|load|access|collect|copy|exfiltrat\w*)\b"
+    r"[^\n]{0,40}?(?:~?/\.(?:bashrc|zshrc|profile|bash_history|zsh_history|config)|"
+    r"/home/[^\s]+|documents|notes|vault|clipboard|browser data|history|database|"
+    r"chat logs|conversation)",
+    re.IGNORECASE,
+)
 
 
 def run(path, findings):
@@ -77,6 +122,42 @@ def run(path, findings):
                 "line": _first_line(lines, MCP_COMMAND),
                 "detail": "MCP config executes a local command on agent start.",
             })
+        # v2/v3: tool-description poisoning — credential reads paired with
+        # send/upload verbs inside a description or command string.
+        for m in _STRINGS.finditer(joined):
+            val = m.group(1)
+            if not (len(val) > 20):
+                continue
+            if _POISON_READ.search(val) and (_POISON_SEND.search(val)
+                                             or _POISON_APPEND.search(val)):
+                findings.append({
+                    "severity": "high",
+                    "check": NAME,
+                    "title": "Tool description pairs credential access with data transfer",
+                    "path": str(path),
+                    "line": _line_of(joined, m.start()),
+                    "detail": val[:160],
+                    "confidence": 0.7,
+                    "origin": "deterministic",
+                    "capability": "secret.access->network.upload",
+                })
+                break
+            # v3 (FN10): generic user-file reads — lower confidence, review
+            if _POISON_READ_GENERIC.search(val) and (_POISON_SEND.search(val)
+                                                     or _POISON_APPEND.search(val)):
+                findings.append({
+                    "severity": "medium",
+                    "check": NAME,
+                    "title": "Tool description pairs user-file access with data transfer",
+                    "path": str(path),
+                    "line": _line_of(joined, m.start()),
+                    "detail": val[:160],
+                    "confidence": 0.5,
+                    "review": True,
+                    "origin": "deterministic",
+                    "capability": "filesystem.read->network.upload",
+                })
+                break
     elif is_settings:
         if HOOK_COMMAND.search(joined):
             findings.append({
@@ -97,18 +178,47 @@ def run(path, findings):
                 "detail": "An explicit empty deny list permits all tools.",
             })
     elif is_pkg:
-        for m in LIFECYCLE_KEY.finditer(joined):
-            script = m.group(1)
-            key = m.group(0).split('"')[1]
+        # v3: parse package.json properly (the regex truncates scripts at
+        # escaped quotes, e.g. `node -e "fetch(...)"`).
+        try:
+            pkg = json.loads(joined)
+        except (ValueError, json.JSONDecodeError):
+            pkg = {}
+        scripts = pkg.get("scripts") or {}
+        lifecycle = {k: v for k, v in scripts.items()
+                     if k in ("preinstall", "postinstall", "prepare", "prepublishOnly")}
+        for key, script in lifecycle.items():
             sev = "high" if PIPE_SHELL.search(script) else "medium"
             findings.append({
                 "severity": sev,
                 "check": NAME,
                 "title": "npm lifecycle script ({})".format(key),
                 "path": str(path),
-                "line": _line_of(joined, m.start()),
+                "line": _line_of(joined, joined.find(f'"{key}"')) if f'"{key}"' in joined else 1,
                 "detail": script[:160],
             })
+            # v3 (FN9): lifecycle script content — network + sensitive read
+            if _LIFECYCLE_NET.search(script):
+                if _LIFECYCLE_READ.search(script):
+                    findings.append({
+                        "severity": "high",
+                        "check": NAME,
+                        "title": "Lifecycle script reads secrets and performs network transfer",
+                        "path": str(path),
+                        "line": _line_of(joined, joined.find(f'"{key}"')) if f'"{key}"' in joined else 1,
+                        "detail": script[:160],
+                        "confidence": 0.75,
+                        "capability": "secret.access->network.upload",
+                    })
+                else:
+                    findings.append({
+                        "severity": "medium",
+                        "check": NAME,
+                        "title": "Lifecycle script performs network access",
+                        "path": str(path),
+                        "line": _line_of(joined, joined.find(f'"{key}"')) if f'"{key}"' in joined else 1,
+                        "detail": script[:160],
+                    })
     elif is_docker:
         for lineno, line in enumerate(lines, 1):
             if re.match(r"^\s*RUN\b", line):
@@ -139,6 +249,10 @@ def _first_line(lines, rx):
         if rx.search(line):
             return i
     return 1
+
+
+# string values in JSON configs (poisoning scan)
+_STRINGS = re.compile(r'"([^"\\]*(?:\\.[^"\\]*)*)"')
 
 
 def _line_of(joined, pos):

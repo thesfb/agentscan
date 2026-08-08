@@ -14,7 +14,22 @@ TEXT_EXTENSIONS = {
     ".env", ".cfg", ".conf", ".rb", ".go", ".rs", ".java", ".php", ".pl",
     ".lua", ".ps1", ".bat", ".fish",
 }
-IGNORED_DIRS = {"node_modules", ".git", ".venv", "venv", "dist", "build", "__pycache__"}
+IGNORED_DIRS = {
+    "node_modules", ".git", ".venv", "venv", "dist", "build", "__pycache__",
+    # v2: generated/build outputs and caches are not author intent
+    ".next", ".turbo", "out", "coverage", ".cache", ".parcel-cache",
+    ".pytest_cache", ".mypy_cache", ".ruff_cache", ".tox", ".nox", ".eggs",
+    ".vercel", ".wrangler", ".terraform", ".idea", ".vscode", "target",
+}
+
+# v2: lockfiles are dependency data, not executable intent — parsed by
+# the supply-chain layer, never pattern-scanned as code.
+IGNORED_FILES = {
+    "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml",
+    "bun.lockb", "bun.lock", "poetry.lock", "Pipfile.lock", "uv.lock",
+    "Cargo.lock", "go.sum", "composer.lock", "Gemfile.lock",
+    ".terraform.lock.hcl", "deno.lock", "flask.lock", "requirements.lock",
+}
 
 
 def is_text_file(path):
@@ -67,3 +82,10 @@ def shannon_entropy(s):
 
     n = len(s)
     return -sum((c / n) * math.log2(c / n) for c in Counter(s).values())
+
+
+# v3: shared remote-code-pipe destination. Matches `| sh`, `| bash`,
+# `| zsh`, `| fish`, `| ksh`, `| dash`, and absolute paths
+# (/bin/sh, /usr/bin/bash), with optional sudo.
+PIPE_SHELL_DEST = r"(?:sudo\s+)?(?:/usr/bin/|/bin/)?(?:ba|z|fi|k|da)?sh\b"
+PIPE_SHELL_RX = re.compile(r"\b(?:curl|wget)\b[^\n]*\|\s*" + PIPE_SHELL_DEST, re.IGNORECASE)

@@ -1,14 +1,24 @@
-"""Check: secrets — known token formats + high-entropy candidates.
+"""Check: secrets — known token formats + high-entropy candidates (v2).
 
 Deterministic: regexes for well-known credential formats (gitleaks-style)
 plus a Shannon-entropy heuristic for opaque tokens. A match is a FACT
 ("this string matches AWS key format"), never a claim of compromise.
+
+v2 changes:
+- Config/env reads are exempted from "secret-like assignment" (reading
+  a secret from config or environment is best practice, not a leak).
+- Token-format matches inside markdown documentation with example
+  markers (or padded/uniform example bodies) are downgraded to low and
+  labeled "documentation context" — the scanner's own security docs
+  must not read as live credentials.
+- Label lookup uses the matched group, not the whole line.
 """
 
 import os
 import re
 
 from ..common import read_lines, shannon_entropy
+from ..context import LineContext
 
 NAME = "secrets"
 TITLE = "Secrets / credentials"
@@ -41,8 +51,18 @@ PATTERNS = [
 # NOTE: 'auth' and 'credential' are intentionally NOT included — they appear
 # in too many benign contexts (type annotations, SDK objects, headers).
 ASSIGN = re.compile(
-    r"""^\s*(?:export\s+)?(?:api[_-]?key|apikey|token|secret|password|passwd)s?\s*[:=]\s*['"]?([^\s'"]{8,})""",
+    r"^\s*(?:export\s+)?(?:api[_-]?key|apikey|token|secret|password|passwd)s?\s*[:=]\s*['\"]?([^\s'\"]{8,})",
     re.IGNORECASE,
+)
+
+# reading a secret from config/env is the RECOMMENDED pattern, not a leak.
+# v2: extended beyond os.getenv/process.env to config-file reads and
+# object-attribute reads (cfg.get, json.load, dotenv, credential.x...).
+READ_CONTEXT = re.compile(
+    r"(?i)getenv|environ|GetEnvironmentVariable|process\.env|os\.environ|"
+    r"cfg\.|config\.|json\.load|yaml\.|toml\.|dotenv|read_text|open\(|"
+    r"\.get\(|settings\.|credential\.|parse_|load_|from_file|Path\(|"
+    r"keyring|secret\.manager|get_secret|vault|aws\.secretsmanager"
 )
 
 # entropy gate: high-entropy scanning is meaningful on assignment-like lines
@@ -63,6 +83,34 @@ PLACEHOLDER = re.compile(
     re.IGNORECASE,
 )
 
+# documentation-context markers: token-format explanations, not credentials
+DOCS_MARKERS = re.compile(
+    r"(?i)format|regex|pattern|followed by|characters|example|fictional|"
+    r"placeholder|documentation|push protection|blocks|matches|redacted|"
+    r"never commit|never hardcode|fake"
+)
+MARKDOWN_EXT = {".md", ".markdown", ".mdown", ".mkd"}
+
+
+def _uniform_body(token):
+    """True when every alnum char of the token is the same char — an
+    obviously padded example (all zeros, all X's), not a real secret."""
+    alnum = [c for c in token if c.isalnum()]
+    return len(alnum) > 0 and len(set(alnum)) <= 1
+
+
+def _docs_downgrade(path, line, ctx, lineno, group):
+    """Return (severity, title_suffix) when a token match sits in markdown
+    documentation with example markers or a padded body."""
+    ext = os.path.splitext(str(path))[1].lower()
+    if ext not in MARKDOWN_EXT:
+        return None
+    in_fence = ctx.fence_lang[lineno - 1] is not None
+    if DOCS_MARKERS.search(line) or _uniform_body(group):
+        return "low", " (documentation context)"
+    return None
+
+
 # cheap gate: secret patterns all start with a distinctive prefix.
 # NOTE: this gate must never exclude a line a PATTERN could match — it is
 # purely a performance optimization. Entropy has its own gate above.
@@ -72,27 +120,31 @@ _PREFILTER = re.compile(
     re.IGNORECASE,
 )
 
-
 # single-pass compiled alternation over PATTERNS (fast path)
 _COMBINED = re.compile("|".join(rx for rx, _, _ in PATTERNS))
 
 
-def _label_for(line, group):
+def _label_for(group):
     for rx, lbl, sev in PATTERNS:
-        if re.match(rx, group) or re.search(rx, line):
+        if re.search(rx, group):
             return lbl, sev
     return "unknown", "medium"
 
 
 def run(path, findings):
     lines = read_lines(path)
+    ctx = LineContext(lines, path)
     for lineno, line in enumerate(lines, 1):
         if not _PREFILTER.search(line):
             continue
         for m in _COMBINED.finditer(line):
             if PLACEHOLDER.match(m.group(0)):
                 continue  # "sk-...", "AKIAXXXX", etc. — examples, not secrets
-            label, sev = _label_for(line, m.group(0))
+            label, sev = _label_for(m.group(0))
+            downgrade = _docs_downgrade(path, line, ctx, lineno, m.group(0))
+            if downgrade:
+                sev, suffix = downgrade
+                label = label + suffix
             findings.append({
                 "severity": sev,
                 "check": NAME,
@@ -104,8 +156,9 @@ def run(path, findings):
         m = ASSIGN.search(line)
         if m and m.group(1):
             value = m.group(1)
-            # reading from env vars is the RECOMMENDED pattern, not a leak
-            if re.search(r"(?i)getenv|environ|GetEnvironmentVariable|process\.env|os\.environ", line):
+            # reading from env/config/credential stores is the RECOMMENDED
+            # pattern, not a leak
+            if READ_CONTEXT.search(line):
                 continue
             # example/placeholder values ("YOUR_API_KEY", "xxx", "<token>") are
             # documentation, not credentials
@@ -128,6 +181,14 @@ def run(path, findings):
                 if tok.lower() in {"localhost", "authentication", "configuration",
                                    "implementation", "documentation"}:
                     continue
+                # v3 (FP7): exclude known non-secret shapes — UUIDs and
+                # fixed-length hex hashes (git SHAs, md5/sha1 digests)
+                # are high-entropy but not credentials.
+                tok_clean = tok.lower().rstrip("=")
+                if re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", tok_clean):
+                    continue
+                if re.fullmatch(r"[0-9a-f]{32}|[0-9a-f]{40}|[0-9a-f]{64}", tok_clean):
+                    continue
                 # a real secret-like token is bounded and dense: 14-64 chars,
                 # and NOT a substring of a longer prose run (e.g. a URL path
                 # or base64 blob would already be flagged elsewhere).
@@ -141,4 +202,5 @@ def run(path, findings):
                         "path": str(path),
                         "line": lineno,
                         "detail": tok[:24] + "…",
+                        "review": True,  # v3: entropy candidates are review-queue
                     })

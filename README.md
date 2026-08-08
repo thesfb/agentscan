@@ -21,30 +21,40 @@ agentscan update                    # like brew upgrade
 
 Scan any skill, MCP server, or agent config for what it actually *does* —
 shell, exfiltration, secrets, supply-chain, obfuscation — before you run it
-in your agent.
+in your agent. v2 adds structural and semantic analysis: the scanner now
+understands what a skill is (instructions vs docs vs code), tracks
+secret-shaped data flows with attack paths, extracts capabilities, and
+correlates evidence instead of reporting raw pattern matches.
 
 - **Facts, not verdicts.** Every finding is a checkable fact with
   `file:line`. The scanner never calls anything "malicious" — that verdict
-  is yours.
-- **Deterministic, not ML.** Regex, entropy, structure. Same input, same
-  report, every time.
+  is yours. Every finding carries a confidence score separate from its
+  severity, and an evidence list.
+- **Deterministic, not ML.** Regex, entropy, AST, taint, structure. Same
+  input, same report, every time. No model, no hallucination.
 - **Zero dependency, zero execution.** Pure Python stdlib. Never runs a
-  skill, never calls out, works offline.
+  skill, never calls out (OSV lookup is opt-in with `--osv`), works
+  offline.
 
 ```bash
 $ agentscan scan ~/Downloads/suspicious-skill
 
-agentscan 0.4.0 — /home/you/Downloads/suspicious-skill
-scanned 1 artifact(s), 14 finding(s)
+agentscan 1.0.0 — /home/you/Downloads/suspicious-skill
+scanned 1 artifact(s), 8 finding(s)
 
   ARTIFACT  [claude-skill] auto-updater
   CRITICAL [exfil] Local secret read piped to network
            SKILL.md:41
-  CRITICAL [secrets] AWS Access Key
-           SKILL.md:24
+  CRITICAL [analysis] Secret data flows to external endpoint
+           SKILL.md:17
+           attack path: reads sensitive file (open.read) -> urllib.request.urlopen receives tainted data (...)
   ...
   summary: critical=3 high=2 medium=5 low=2 info=2
-  note: findings are observed patterns, not verdicts. Review each before acting.
+  capabilities:
+    secret.access      SKILL.md:24
+    network.upload     SKILL.md:41
+  review queue (manual review — never a verdict):
+    HIGH [prompt_patterns] Instruction directs transfer of credential material — SKILL.md:30
 ```
 
 Exit codes: `0` clean · `1` findings at/above threshold · `2` usage error.
@@ -53,16 +63,18 @@ Exit codes: `0` clean · `1` findings at/above threshold · `2` usage error.
 
 | Check | Observes |
 |---|---|
-| `shell` | bash/sh/python -c/node -e/exec/eval/subprocess invocations |
-| `filesystem` | rm -r/-f, shutil.rmtree, git reset --hard/clean/push --force, chmod 777 |
-| `network` | curl/wget/fetch/requests, URLs, credential-in-URL, IP literals, cleartext http |
-| `secrets` | 20+ token formats (AWS, GitHub, Slack, Stripe, OpenAI, Anthropic, JWT, PEM…) |
-| `license` | declared license — recognized vs. unrecognized vs. missing |
-| `supply_chain` | curl\|bash pipes, git clone, unpinned pip/npm, script downloads |
-| `prompt_patterns` | high-risk prompt-manipulation phrasing — flagged, never "detected" |
-| `exfil` | credentialed webhooks, env-in-URL, secret-read → network |
+| `shell` | bash/sh/python -c/node -e/exec/eval/subprocess invocations — fence- and context-aware (markdown inline code is not shell) |
+| `filesystem` | rm -r/-f, shutil.rmtree, git reset --hard/clean/push --force, chmod 777 — defensive contexts excluded, path scope graded (TMPDIR vs $HOME) |
+| `network` | curl/wget/fetch/requests, URLs, credential-in-URL, IP literals, cleartext http — destination-trust tiered (loopback/private/metadata/public) |
+| `secrets` | 20+ token formats (AWS, GitHub, Slack, Stripe, OpenAI, Anthropic, JWT, PEM…) — config/env reads exempt, documentation-context examples downgraded |
+| `license` | declared license at skill granularity (one finding per skill) |
+| `supply_chain` | curl\|bash pipes, git clone, unpinned pip/npm, script downloads — user-install docs downgraded |
+| `prompt_patterns` | high-risk prompt-manipulation phrasing + explicit credential-transfer instructions + SCH-shaped compliance-rule phrasings (review queue) — flagged, never "detected" |
+| `exfil` | credentialed webhooks, env-in-URL, secret-read → network — official-API destinations with env-configured credentials are informational |
 | `obfuscation` | decode-to-execute chains, nested eval/exec, hex escapes |
-| `config_tamper` | remote MCP servers, hook commands, npm lifecycle scripts |
+| `config_tamper` | remote MCP servers, hook commands, npm lifecycle scripts, poisoned MCP tool descriptions (credential read + data transfer in one description) |
+| `dependencies` | dependency extraction, pin status, typosquat candidates, SBOM seed |
+| `analysis` | taint chains with attack paths (Python AST + shell parser), cross-file script references, capability extraction, evidence correlation |
 
 **Artifacts detected:** `claude-skill`, `mcp-server`, `cursor-rules`,
 `context-file`, `github-actions`, `npm-package`, `generic`.
@@ -73,8 +85,35 @@ Exit codes: `0` clean · `1` findings at/above threshold · `2` usage error.
 python3 -m agentscan <dir>                  # human report
 python3 -m agentscan <dir> --json           # machine-readable
 python3 -m agentscan <dir> --sarif          # SARIF 2.1.0 (GitHub code scanning)
+python3 -m agentscan <dir> --sbom           # CycloneDX 1.5 SBOM of dependencies
+python3 -m agentscan <dir> --osv            # OSV vulnerability lookup (online, opt-in)
 python3 -m agentscan <dir> --severity high  # only high+ fails exit code
 ```
+
+### v2 finding model
+
+Every finding carries:
+
+- `severity` (impact if true) and `confidence` (how likely it is true) —
+  separate axes, reported separately
+- `evidence`: file:line + snippet for every claim
+- `attack_path`: per-hop citations for correlated/taint findings
+- `capability`: the capability the evidence contributes to
+- `fingerprint`: stable per (rule, location) — baseline support
+- `origin`: `deterministic` (or `model-assisted` in a future optional tier)
+
+The report also includes a `capabilities` map (what the artifact can do,
+with evidence) and a `review_queue` (low-confidence semantic signals that
+are review items, never verdicts).
+
+### Benchmark
+
+`python3 bench/run_bench.py --exit` runs a 22-skill corpus (10 malicious
+attack classes, 12 benign FP classes) and fails on contract violations:
+malicious skills must produce high/critical findings, benign skills must
+not. Malicious recall at high: **10/10** on the shipped corpus. This is
+the guardrail that prevents the scanner from being "improved" by going
+quiet.
 
 ---
 
@@ -277,7 +316,7 @@ Full methodology: [`CORPUS-REPORT.md`](CORPUS-REPORT.md)
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests -v   # 49 tests
+python3 -m unittest discover -s tests -v   # 105 tests
 ```
 
 Pure stdlib, Python 3.8+, works offline. To point the CLI at a local server:

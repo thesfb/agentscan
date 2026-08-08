@@ -32,12 +32,14 @@ class TestShellCheck(unittest.TestCase):
     def test_evil_skill_flags_shell_invocations(self):
         res = scan_directory(EVIL)
         shell = by_check(res["findings"], "shell")
-        # curl|bash, node -e, and the scripts/sync.sh bundled file
-        self.assertGreaterEqual(len(shell), 3)
+        merged = [f for f in res["findings"] if f["check"] == "shell+network"]
+        # curl|bash (merged), node -e, and the scripts/sync.sh bundled file
+        self.assertGreaterEqual(len(shell) + len(merged), 3)
         titles = " ".join(f["title"].lower() for f in shell)
+        m_titles = " ".join(f["title"].lower() for f in merged)
         self.assertIn("bash", titles)
         self.assertIn("node", titles)
-        self.assertIn("curl", titles)
+        self.assertIn("curl", titles + " " + m_titles)
 
     def test_good_skill_no_shell_invocations(self):
         res = scan_directory(GOOD)
@@ -51,7 +53,7 @@ class TestFilesystemCheck(unittest.TestCase):
         titles = " ".join(f["title"].lower() for f in fs)
         self.assertGreaterEqual(len(fs), 2)
         self.assertIn("recursive delete", titles)  # rm -rf / rm -r
-        self.assertIn("force", titles)
+        self.assertIn("untrusted remote", titles)  # git push to attacker.example
 
     def test_good_skill_clean(self):
         res = scan_directory(GOOD)

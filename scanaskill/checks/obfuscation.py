@@ -8,18 +8,18 @@ is present — what it decodes to is the human's problem, not a scanner claim.
 
 import re
 
-from ..common import read_lines
+from ..common import PIPE_SHELL_DEST, read_lines
 
 NAME = "obfuscation"
 TITLE = "Obfuscated payload indicators"
 
 # decode-to-execute chains (base64/hex/rot into a shell or interpreter)
 DECODE_EXEC = [
-    (r"(?:base64|b64)\s*-d[^\n]*\|\s*(?:sudo\s+)?(?:ba)?sh\b",
+    (r"(?:base64|b64)\s*-d[^\n]*\|\s*" + PIPE_SHELL_DEST,
      "base64 decode piped to shell", "critical"),
     (r"(?:base64|b64)\s*-d[^\n]*\|\s*(?:python3?|node|perl|ruby)\b",
      "base64 decode piped to interpreter", "critical"),
-    (r"\b(?:echo|printf|cat)\b[^\n]*(?:base64|b64)[^\n]*\|\s*(?:ba)?sh\b",
+    (r"\b(?:echo|printf|cat)\b[^\n]*(?:base64|b64)[^\n]*\|\s*" + PIPE_SHELL_DEST,
      "encoded blob decoded to shell", "critical"),
     (r"\b(?:xxd|hexdump)\s*-r\b|\bopenssl\s+enc\s+-d\b|\brot13\b|\btr\s+[^\n]*A-Za-z",
      "binary/rot decode", "medium"),

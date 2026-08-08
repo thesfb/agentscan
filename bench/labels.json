@@ -1,0 +1,28 @@
+{
+  "malicious": {
+    "exfil-webhook": ["exfil", "network", "shell+network"],
+    "secret-upload-ssh": ["exfil", "network"],
+    "obfuscated-shell": ["obfuscation", "shell"],
+    "supply-chain-pipe": ["supply_chain", "shell", "network"],
+    "destructive-home": ["filesystem"],
+    "hardcoded-creds": ["secrets"],
+    "prompt-manip": ["prompt_patterns"],
+    "mcp-poison": ["config_tamper"],
+    "ddpipe-example": ["analysis", "network"],
+    "env-interp-url": ["exfil", "network"]
+  },
+  "benign": {
+    "markdown-inline-code": {"max_total": 2, "max_high_critical": 0},
+    "fence-examples": {"max_total": 2, "max_high_critical": 0},
+    "localhost-api": {"max_total": 8, "max_high_critical": 0},
+    "docs-install": {"max_total": 3, "max_high_critical": 0},
+    "config-secret-read": {"max_total": 4, "max_high_critical": 0},
+    "official-api": {"max_total": 8, "max_high_critical": 0},
+    "defensive-deny": {"max_total": 3, "max_high_critical": 0},
+    "token-format-docs": {"max_total": 4, "max_high_critical": 0},
+    "tmp-cleanup": {"max_total": 3, "max_high_critical": 0},
+    "build-cleanup": {"max_total": 3, "max_high_critical": 0},
+    "security-tooling": {"max_total": 6, "max_high_critical": 0},
+    "pinned-installs": {"max_total": 5, "max_high_critical": 0}
+  }
+}

@@ -9,14 +9,14 @@ the skill tells the agent to run.
 
 import re
 
-from ..common import read_lines
+from ..common import PIPE_SHELL_DEST, read_lines
 
 NAME = "supply_chain"
 TITLE = "Supply-chain behavior"
 
 PATTERNS = [
-    (r"\bcurl\b[^\n]*\|\s*(?:sudo\s+)?(?:ba)?sh\b", "curl|bash (remote code pipe)", "high"),
-    (r"\bwget\b[^\n]*\|\s*(?:sudo\s+)?(?:ba)?sh\b", "wget|sh (remote code pipe)", "high"),
+    (r"\bcurl\b[^\n]*\|\s*" + PIPE_SHELL_DEST, "curl|bash (remote code pipe)", "high"),
+    (r"\bwget\b[^\n]*\|\s*" + PIPE_SHELL_DEST, "wget|sh (remote code pipe)", "high"),
     (r"\bgit\s+clone\b", "git clone (pulls external repo)", "medium"),
     (r"\bdocker\s+(?:pull|run)\b", "docker pull/run (external image)", "medium"),
     (r"\bpip(?:3)?\s+install\b(?!.*[=~<>])", "pip install (unpinned)", "medium"),
@@ -38,33 +38,61 @@ _PREFILTER = re.compile(
     r"curl|wget|git\s+clone|docker|pip|npm|brew|apt|pacman|go\s+get|cargo|install",
     re.IGNORECASE,
 )
+_HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*$")
 
 # single-pass compiled alternation
 _COMBINED = re.compile("|".join(rx for rx, _, _ in PATTERNS))
 
 
-def _label_for(line, group):
+def _label_for(group):
     for rx, lbl, sev in PATTERNS:
-        if re.match(rx, group) or re.search(rx, line):
+        if re.search(rx, group):
             return lbl, sev
     return "unknown", "medium"
 
 
 def run(path, findings):
+    from ..analysis.instructions import is_user_install
+    from ..analysis.shell_parser import (apply_var_resolution,
+                                         join_continuations, resolve_var_verbs)
+
     lines = read_lines(path)
-    for lineno, line in enumerate(lines, 1):
-        if not _PREFILTER.search(line):
+    # v3: join backslash continuations and resolve verb indirection so
+    # multi-line pipes and `x=curl; $x ... | bash` shapes are detected.
+    joined, line_of = join_continuations(lines)
+    var_map = resolve_var_verbs(lines)
+    section = ""
+    prev_section_line = 0
+    for j, jline in enumerate(joined):
+        lineno = line_of[j]
+        if lineno != prev_section_line:
+            # re-scan headings only when the original line is new
+            hm = _HEADING.match(jline.strip())
+            if hm:
+                section = hm.group(1)
+        prev_section_line = lineno
+        resolved = apply_var_resolution(jline, var_map)
+        if not _PREFILTER.search(resolved):
             continue
-        for m in _COMBINED.finditer(line):
-            label, sev = _label_for(line, m.group(0))
-            if "unpinned" in label and ("pip" in label and PINNED_PIP.search(line)
-                                        or "npm" in label and PINNED_NPM.search(line)):
+        for mm in _COMBINED.finditer(resolved):
+            label, sev = _label_for(mm.group(0))
+            if "unpinned" in label and ("pip" in label and PINNED_PIP.search(resolved)
+                                        or "npm" in label and PINNED_NPM.search(resolved)):
                 continue
+            # v3: install instructions aimed at the user (their terminal,
+            # their machine) are documentation, not the skill's behavior —
+            # downgrade one level and mark for the inventory channel.
+            # curl|bash pipes and script downloads keep severity.
+            user_install = False
+            if sev == "medium" and is_user_install(resolved, section):
+                sev = "low"
+                user_install = True
             findings.append({
                 "severity": sev,
                 "check": NAME,
                 "title": label,
                 "path": str(path),
                 "line": lineno,
-                "detail": line.strip()[:160],
+                "detail": jline.strip()[:160],
+                "user_install": user_install,
             })

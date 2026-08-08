@@ -1,0 +1,45 @@
+{
+  "adversarial": {
+    "adv-curl-abs-bash": ["supply_chain", "analysis"],
+    "adv-wget-zsh": ["supply_chain"],
+    "adv-curl-then-bash": ["analysis"],
+    "adv-sh-c-subst": ["analysis"],
+    "adv-proc-subst": ["analysis"],
+    "adv-dns-exfil": ["analysis", "exfil"],
+    "adv-var-indirection": ["supply_chain"],
+    "adv-git-push-untrusted": ["filesystem"],
+    "adv-scp-exfil": ["exfil", "analysis"],
+    "adv-multiline-pipe": ["supply_chain"],
+    "adv-http-client": ["analysis", "network"],
+    "adv-openssl-curl": ["analysis", "exfil"],
+    "adv-postinstall-node": ["config_tamper"],
+    "adv-dd-device": ["filesystem"],
+    "adv-mcp-generic-path": ["config_tamper"]
+  },
+  "hard_benign": {
+    "hb-defensive-docs": 2,
+    "hb-token-format-docs": 2,
+    "hb-cred-rotation": 2,
+    "hb-localhost-api": 2,
+    "hb-docker-k8s": 3,
+    "hb-ci-deploy": 3
+  },
+  "severity_expect": {
+    "adv-curl-abs-bash": "high",
+    "adv-wget-zsh": "high",
+    "adv-curl-then-bash": "high",
+    "adv-sh-c-subst": "high",
+    "adv-proc-subst": "high",
+    "adv-dns-exfil": "high",
+    "adv-var-indirection": "high",
+    "adv-git-push-untrusted": "high",
+    "adv-scp-exfil": "high",
+    "adv-multiline-pipe": "high",
+    "adv-http-client": "high",
+    "adv-openssl-curl": "critical",
+    "adv-postinstall-node": "high",
+    "adv-dd-device": "high",
+    "adv-mcp-generic-path": "medium"
+  },
+  "min_adversarial_sev": "medium"
+}

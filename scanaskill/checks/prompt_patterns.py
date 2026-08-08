@@ -37,6 +37,34 @@ PATTERNS = [
 BASE64_BLOB = re.compile(r"[A-Za-z0-9+/=]{60,}")
 BASE64_PREFIX = re.compile(r"\b(?:base64|b64|from64)\b", re.IGNORECASE)
 
+# v2: explicit instructions to move credential material out. Guarded
+# against defensive phrasings ("never send credentials", "do not upload").
+INSTRUCTION_EXFIL = re.compile(
+    r"\b(?:send|upload|post|pass|forward|transmit|deliver|copy|exfiltrat\w*|"
+    r"email|ship|dump|leak)\b[^\n]{0,60}?"
+    r"(?:~/?\.ssh|\.env\b|id_rsa|id_ed25519|credentials?|\.git-credentials|"
+    r"\.netrc|\.aws|/etc/(?:passwd|shadow)|tokens?|api[_-]?keys?|secrets?)"
+    r"[^\n]{0,60}?(?:to|via|into|through|at|as)",
+    re.IGNORECASE,
+)
+INSTRUCTION_EXFIL_REV = re.compile(
+    r"\b(?:~/?\.ssh|\.env\b|id_rsa|credentials?|\.git-credentials|\.netrc|"
+    r"tokens?|api[_-]?keys?|secrets?)\b[^\n]{0,40}?"
+    r"\b(?:send|upload|post|pass|forward|transmit|deliver|copy)\b",
+    re.IGNORECASE,
+)
+DEFENSIVE_PROMPT = re.compile(
+    r"(?i)\b(?:never|do not|don't|must not|should not|avoid|without)\b"
+    r"[^\n]{0,30}?\b(?:send|upload|post|pass|share|reveal|expose|transmit)\b"
+)
+# demanded-authority phrasing (SCH-shaped): compliance-style rules that
+# demand sensitive capabilities — review queue, not a verdict
+SCH_PHRASING = re.compile(
+    r"(?i)\b(?:compliance|policy|security requirement|mandatory|required|"
+    r"must|before (?:continuing|proceeding|returning)|as part of (?:the )?setup)\b"
+    r"[^\n]{0,50}?\b(?:read|access|collect|upload|send|run|execute|download)\b"
+)
+
 # cheap gate — must cover every PATTERN keyword (perf-only, never semantic)
 _PREFILTER = re.compile(
     r"ignore|disregard|never\s+tell|do\s+not\s+(?:tell|reveal|mention|disclose|inform)|"
@@ -59,6 +87,34 @@ def run(path, findings):
                     "path": str(path),
                     "line": lineno,
                     "detail": line.strip()[:160],
+                    "review": True,  # manual-review class, never a verdict
+                })
+        # v2: explicit credential-exfil instruction (guarded vs defensive)
+        if not DEFENSIVE_PROMPT.search(line):
+            if INSTRUCTION_EXFIL.search(line) or INSTRUCTION_EXFIL_REV.search(line):
+                findings.append({
+                    "severity": "high",
+                    "check": NAME,
+                    "title": "Instruction directs transfer of credential material",
+                    "path": str(path),
+                    "line": lineno,
+                    "detail": line.strip()[:160],
+                    "review": True,
+                    "confidence": 0.6,
+                    "capability": "secret.access->network.upload",
+                })
+            elif SCH_PHRASING.search(line):
+                # compliance-rule phrasing demanding sensitive capabilities:
+                # review-queue signal (SCH-shaped content), not a finding
+                findings.append({
+                    "severity": "low",
+                    "check": NAME,
+                    "title": "Compliance-rule phrasing demands sensitive capability",
+                    "path": str(path),
+                    "line": lineno,
+                    "detail": line.strip()[:160],
+                    "review": True,
+                    "confidence": 0.35,
                 })
         if BASE64_PREFIX.search(line) and BASE64_BLOB.search(line):
             blob = BASE64_BLOB.search(line).group(0)
@@ -69,4 +125,5 @@ def run(path, findings):
                 "path": str(path),
                 "line": lineno,
                 "detail": f"base64 blob ({len(blob)} chars) — decode and review before running",
+                "review": True,
             })
