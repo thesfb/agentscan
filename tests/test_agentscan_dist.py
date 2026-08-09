@@ -30,13 +30,13 @@ ROOT_SRC = str(Path(__file__).resolve().parent.parent)
 
 def make_pkg(**overrides) -> Package:
     base = dict(
-        id="security-engineer",
-        title="Security Engineer",
+        id="trust-pack",
+        title="Trust Pack",
         version="1.0.0",
-        description="Threat modeling and secure code auditing.",
+        description="The core professional skill bundle.",
         sha256="",
         release="v1.0.0",
-        asset="security-engineer-1.0.0.tar.gz",
+        asset="trust-pack-1.0.0.tar.gz",
     )
     base.update(overrides)
     return Package.from_dict(base)
@@ -66,13 +66,13 @@ def make_tarball(dest: Path, pkg_id: str, manifest_ok: bool = True) -> Path:
 class ModelsTest(unittest.TestCase):
     def test_package_from_dict(self):
         p = make_pkg()
-        self.assertEqual(p.id, "security-engineer")
+        self.assertEqual(p.id, "trust-pack")
         self.assertEqual(p.version, "1.0.0")
 
     def test_catalog_find(self):
         p = make_pkg()
         c = Catalog.from_dict({"packages": [p.__dict__]})
-        self.assertIsNotNone(c.find("security-engineer"))
+        self.assertIsNotNone(c.find("trust-pack"))
         self.assertIsNone(c.find("nope"))
 
 
@@ -457,7 +457,7 @@ class RuntimeTest(unittest.TestCase):
             buf = _io.BytesIO()
             with _tf.open(fileobj=buf, mode="w:gz") as tf:
                 for name, content in {
-                    "pkg/manifest.json": json.dumps({"id": "security-engineer", "version": "1.0.0"}),
+                    "pkg/manifest.json": json.dumps({"id": "trust-pack", "version": "1.0.0"}),
                     "pkg/claude/skill-a/SKILL.md": "---\nname: skill-a\ndescription: x\nlicense: MIT\n---\nbody\n",
                     "pkg/AGENTS.md": "---\nlicense: MIT\n---\n# setup\n",
                 }.items():

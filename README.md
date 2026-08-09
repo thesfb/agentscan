@@ -11,7 +11,7 @@ pip install agentscan-cli
 agentscan scan ~/.claude/skills     # free, local, deterministic
 agentscan activate                  # Trusted Distribution license
 agentscan search                    # what's available
-agentscan install security-engineer # one command, verified
+agentscan install trust-pack # one command, verified
 agentscan update                    # like brew upgrade
 ```
 
@@ -39,7 +39,7 @@ correlates evidence instead of reporting raw pattern matches.
 ```bash
 $ agentscan scan ~/Downloads/suspicious-skill
 
-agentscan 1.0.0 — /home/you/Downloads/suspicious-skill
+agentscan 1.1.0 — /home/you/Downloads/suspicious-skill
 scanned 1 artifact(s), 8 finding(s)
 
   ARTIFACT  [claude-skill] auto-updater
@@ -190,11 +190,11 @@ agentscan verify                    # signature · latest · audit · intact
 Package names are matched flexibly — any of these work:
 
 ```bash
-agentscan install security-engineer
-agentscan install "Security Engineer"
-agentscan install Security Engineer
-agentscan install security
-agentscan install secuirty        # typos are suggested, not silent
+agentscan install trust-pack
+agentscan install "Trust Pack"
+agentscan install Trust Pack
+agentscan install trust
+agentscan install trustpac        # typos are suggested, not silent
 ```
 
 ### Runtimes
@@ -214,12 +214,12 @@ are present it installs into all of them; when none are detected it prompts,
 or you can pick explicitly:
 
 ```bash
-agentscan install security-engineer --runtime claude
-agentscan install security-engineer --runtime opencode
-agentscan install security-engineer --runtime codex
-agentscan install security-engineer --runtime hermes
-agentscan install security-engineer --runtime grok
-agentscan install security-engineer --runtime all
+agentscan install trust-pack --runtime claude
+agentscan install trust-pack --runtime opencode
+agentscan install trust-pack --runtime codex
+agentscan install trust-pack --runtime hermes
+agentscan install trust-pack --runtime grok
+agentscan install trust-pack --runtime all
 ```
 
 Hermes follows the agentskills.io open standard: skills are discovered
@@ -259,7 +259,7 @@ A package is **not** just a skill. It may contain agents, skills, slash
 commands, templates, workflows, and knowledge:
 
 ```
-security-engineer/
+trust-pack/
   manifest.json     id, title, version, description, license, requires
   agents/           optional agent definitions
   skills/           SKILL.md files
@@ -274,9 +274,9 @@ security-engineer/
 `manifest.json` ships one package definition per the catalog shape:
 
 ```json
-{ "packages": [ { "id": "security-engineer", "title": "Security Engineer",
-  "version": "1.0.1", "description": "…", "sha256": "…",
-  "release": "v1.0.1", "asset": "security-engineer-1.0.1.tar.gz" } ] }
+{ "packages": [ { "id": "trust-pack", "title": "Trust Pack",
+  "version": "1.0.0", "description": "…", "sha256": "…",
+  "release": "v1.0.0", "asset": "trust-pack-1.0.0.tar.gz" } ] }
 ```
 
 ### Status of the paid layer

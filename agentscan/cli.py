@@ -57,7 +57,7 @@ examples:
   agentscan scan .
   agentscan activate
   agentscan search
-  agentscan install security-engineer
+  agentscan install trust-pack
   agentscan update
   agentscan verify
 

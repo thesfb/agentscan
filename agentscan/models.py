@@ -53,8 +53,8 @@ class Catalog:
         """Resolve a user-supplied package query to a package.
 
         Matching is forgiving: whitespace, hyphens, underscores and case
-        are all normalized ("devops-engineer", "DevOps Engineer",
-        "DEVOPS ENGINEER" and "devops" all resolve to devops-engineer).
+        are all normalized ("trust-pack", "Trust Pack",
+        "TRUST PACK" and "trust" all resolve to trust-pack).
 
         Returns a 4-tuple:
             (package, note, candidates, suggestion)
@@ -88,7 +88,7 @@ class Catalog:
             return None, "", [p.id for p in prefix], None
 
         # 2b. word match (query is a whole word of the id/title:
-        #     "security" → security-engineer, "engineer" → ambiguous)
+        #     "trust" → trust-pack, "pack" → ambiguous)
         word_matches = [
             p for p in self.packages
             if q in norm(p)[0].split() or q in norm(p)[1].split()
@@ -98,7 +98,7 @@ class Catalog:
         if len(word_matches) > 1:
             return None, "", [p.id for p in word_matches], None
 
-        # 3. fuzzy (typos: "secuirty" → security-engineer)
+        # 3. fuzzy (typos: "trustpac" → trust-pack)
         import difflib
 
         pool: dict[str, Package] = {}
@@ -125,8 +125,8 @@ class Catalog:
 def normalize_name(name: str) -> str:
     """Lowercase and collapse separators: hyphens, underscores, spaces.
 
-    "DevOps Engineer", "devops-engineer", "DEVOPS_ENGINEER" and
-    "  devops  engineer " all normalize to "devops engineer".
+    "Trust Pack", "trust-pack", "TRUST_PACK" and
+    "  trust  pack " all normalize to "trust pack".
     """
     return " ".join(name.lower().replace("_", " ").replace("-", " ").split())
 
