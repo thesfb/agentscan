@@ -44,7 +44,7 @@ from .config import (
     save_license,
 )
 from . import installer
-from .installer import InstallError, RUNTIME_DIRS, RUNTIME_NAMES
+from .installer import InstallError, RUNTIME_AGENT_DIRS, RUNTIME_DIRS, RUNTIME_NAMES
 from .models import Catalog, Package, normalize_name
 from . import runtimes
 from .runtimes import detect_installed, prompt_for_runtime, resolve_runtimes
@@ -224,6 +224,14 @@ def _install_summary(pkg: Package, counts, runtimes_: dict, agents_written) -> N
         print(f"    {RUNTIME_DIRS[runtime]}")
         n = len(record.get("skills", []))
         print(f"    {n} skill(s)")
+        agent_dir = RUNTIME_AGENT_DIRS.get(runtime)
+        if agent_dir is not None:
+            agent_files = sorted(
+                p.name for p in agent_dir.iterdir() if p.is_file()
+            ) if agent_dir.is_dir() else []
+            print(f"    {len(agent_files)} agent(s)")
+            if agent_files:
+                print(f"    {agent_dir}")
     if skills or commands or knowledge or has_readme:
         print("  Package contents")
         if skills:

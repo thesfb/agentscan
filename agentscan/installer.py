@@ -81,6 +81,38 @@ RUNTIME_DIRS: Dict[str, Path] = {
     "grok": _grok_skills_dir(),
 }
 
+
+def _grok_agents_dir() -> Path:
+    """$GROK_HOME/agents when GROK_HOME is set, else ~/.grok/agents.
+
+    Verified in the grok-build source (xai-org/grok-build,
+    crates/codegen/xai-grok-agent/src/discovery.rs): agent files are
+    .md + YAML frontmatter discovered under <grok-home>/agents (user
+    scope), and GROK_HOME overrides the home like HERMES_HOME does.
+    """
+    from .runtimes import grok_home_dir
+
+    return grok_home_dir() / "agents"
+
+
+# Native agent definition directories per runtime (verified 2026-08-10
+# against each harness's official docs / source):
+#   claude   ~/.claude/agents/            (markdown + YAML frontmatter)
+#   opencode ~/.config/opencode/agents/   (markdown, file name = agent)
+#   codex    ~/.codex/agents/             (TOML, name/description/
+#                                         developer_instructions)
+#   grok     ~/.grok/agents/              (markdown; GROK_HOME-aware,
+#                                         also reads ~/.claude/agents/)
+#   hermes   (none — Hermes has no file-based agents; delegation is the
+#             native mechanism, documented in hermes/agents/README.md)
+RUNTIME_AGENT_DIRS: Dict[str, Optional[Path]] = {
+    "claude": Path.home() / ".claude" / "agents",
+    "opencode": Path.home() / ".config" / "opencode" / "agents",
+    "codex": Path.home() / ".codex" / "agents",
+    "grok": _grok_agents_dir(),
+    "hermes": None,
+}
+
 # Layout subdir inside the package tarball per runtime.
 RUNTIME_LAYOUT = {
     "claude": "claude",
@@ -266,9 +298,36 @@ def install_layouts(tmp: Path, pkg: Package, runtimes: List[str]) -> InstallResu
                 shutil.rmtree(target)
             shutil.copytree(skill_dir, target)
         result.dests[runtime] = dest_root
+        _install_agents(tmp, runtime, dest_root)
     # AGENTS.md (agents.md convention) — repo root only.
     result.agents_written = _write_agents_md(tmp, pkg)
     return result
+
+
+def _install_agents(tmp: Path, runtime: str, dest_root: Path) -> List[str]:
+    """Copy a runtime's agent definition files into its native agents dir.
+
+    The package tarball carries per-runtime agent adapters under
+    <runtime>/agents/ (claude/*.md, codex/*.toml, opencode/*.md,
+    grok/*.md, hermes/README.md). Each file-based runtime discovers
+    agents in its own native directory; Hermes has no file-based agents
+    so its delegation guide is copied next to the skills instead.
+
+    Returns the paths written (empty when the runtime has no agent dir).
+    """
+    layout = tmp / RUNTIME_LAYOUT[runtime] / "agents"
+    dest = RUNTIME_AGENT_DIRS.get(runtime)
+    if dest is None or not layout.is_dir():
+        return []
+    dest.mkdir(parents=True, exist_ok=True)
+    written: List[str] = []
+    for f in sorted(layout.iterdir()):
+        if not f.is_file():
+            continue
+        target = dest / f.name
+        target.write_bytes(f.read_bytes())
+        written.append(str(target))
+    return written
 
 
 def count_package(pkg_dir: Path):
@@ -326,6 +385,19 @@ def remove_package(pkg: Package, runtimes: List[str]) -> List[str]:
                 if target.exists():
                     shutil.rmtree(target)
                     removed.append(str(target))
+            # Remove this package's agent definitions from the runtime's
+            # native agents dir (only files whose name matches a package
+            # agent; never delete the whole dir).
+            agent_layout = tmp / RUNTIME_LAYOUT[runtime] / "agents"
+            agent_dest = RUNTIME_AGENT_DIRS.get(runtime)
+            if agent_dest is not None and agent_layout.is_dir() and agent_dest.is_dir():
+                for f in agent_layout.iterdir():
+                    if not f.is_file():
+                        continue
+                    target = agent_dest / f.name
+                    if target.exists():
+                        target.unlink()
+                        removed.append(str(target))
     finally:
         if tmp.exists() and tmp.name.endswith(".tmp"):
             shutil.rmtree(tmp)

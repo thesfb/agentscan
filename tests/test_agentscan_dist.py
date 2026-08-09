@@ -481,6 +481,155 @@ class RuntimeTest(unittest.TestCase):
             inst.RUNTIME_DIRS = orig
             inst.cache_path = orig_cache
 
+    def test_install_layouts_installs_agents_to_native_dirs(self):
+        """Agent files land in each runtime's native agents dir (verified
+        against each harness's docs: claude ~/.claude/agents, opencode
+        ~/.config/opencode/agents, codex ~/.codex/agents, grok
+        $GROK_HOME/agents; hermes has no file-based agents)."""
+        import agentscan.installer as inst
+        from agentscan.runtimes import RUNTIMES
+
+        pkg = make_pkg()
+        tmp = self.root / "pkg"
+        for runtime in ("claude", "opencode", "codex", "hermes", "grok"):
+            layout = tmp / runtime / "skill-a"
+            layout.mkdir(parents=True)
+            (layout / "SKILL.md").write_text(
+                "---\nname: skill-a\ndescription: x\nlicense: MIT\n---\nbody\n"
+            )
+            agents = tmp / runtime / "agents"
+            agents.mkdir(parents=True, exist_ok=True)
+        (tmp / "claude" / "agents" / "security-reviewer.md").write_text(
+            "---\nname: security-reviewer\ndescription: x\n---\nbody\n"
+        )
+        (tmp / "codex" / "agents" / "security-reviewer.toml").write_text(
+            'name = "security-reviewer"\ndescription = "x"\n'
+        )
+        (tmp / "opencode" / "agents" / "security-reviewer.md").write_text(
+            "---\ndescription: x\nmode: subagent\n---\nbody\n"
+        )
+        (tmp / "grok" / "agents" / "security-reviewer.md").write_text(
+            "---\nname: security-reviewer\ndescription: x\n---\nbody\n"
+        )
+        (tmp / "hermes" / "agents" / "README.md").write_text("# guide\n")
+        (tmp / "AGENTS.md").write_text("---\nlicense: MIT\n---\n# setup\n")
+
+        orig = inst.RUNTIME_DIRS
+        orig_agents = inst.RUNTIME_AGENT_DIRS
+        inst.RUNTIME_DIRS = {
+            "claude": self.root / "claude-skills",
+            "opencode": self.root / "opencode-skills",
+            "codex": self.root / "agents-skills",
+            "hermes": self.root / "hermes-skills",
+            "grok": self.root / "grok-skills",
+        }
+        inst.RUNTIME_AGENT_DIRS = {
+            "claude": self.root / "claude-agents",
+            "opencode": self.root / "opencode-agents",
+            "codex": self.root / "codex-agents",
+            "grok": self.root / "grok-agents",
+            "hermes": None,
+        }
+        try:
+            fake_repo = self.root / "repo"
+            fake_repo.mkdir()
+            subprocess.run(["git", "init", "-q", str(fake_repo)], check=True)
+            orig_cwd = Path.cwd()
+            os.chdir(fake_repo)
+            try:
+                inst.install_layouts(tmp, pkg, list(RUNTIMES))
+            finally:
+                os.chdir(orig_cwd)
+            # Every file-based runtime got its native agent file.
+            claude_agents = inst.RUNTIME_AGENT_DIRS["claude"]
+            opencode_agents = inst.RUNTIME_AGENT_DIRS["opencode"]
+            codex_agents = inst.RUNTIME_AGENT_DIRS["codex"]
+            grok_agents = inst.RUNTIME_AGENT_DIRS["grok"]
+            self.assertIsNotNone(claude_agents)
+            self.assertIsNotNone(opencode_agents)
+            self.assertIsNotNone(codex_agents)
+            self.assertIsNotNone(grok_agents)
+            assert claude_agents is not None
+            assert opencode_agents is not None
+            assert codex_agents is not None
+            assert grok_agents is not None
+            self.assertTrue((claude_agents / "security-reviewer.md").is_file())
+            self.assertTrue((opencode_agents / "security-reviewer.md").is_file())
+            self.assertTrue((codex_agents / "security-reviewer.toml").is_file())
+            self.assertTrue((grok_agents / "security-reviewer.md").is_file())
+            # Hermes: no file-based agents — nothing written, no crash.
+            self.assertIsNone(inst.RUNTIME_AGENT_DIRS["hermes"])
+            # Removal removes the agent files too. remove_package rebuilds
+            # the package from the cache tarball, so seed the cache with
+            # the same layout (agent files included).
+            orig_cache = inst.cache_path
+            inst.cache_path = lambda pkg: self.root / "pkg.tar.gz"
+            import io as _io, tarfile as _tf
+
+            def _tar_member(tf, name, content):
+                info = _tf.TarInfo(name)
+                data = content.encode()
+                info.size = len(data)
+                tf.addfile(info, _io.BytesIO(data))
+
+            buf = _io.BytesIO()
+            with _tf.open(fileobj=buf, mode="w:gz") as tf:
+                _tar_member(tf, "pkg/manifest.json",
+                            json.dumps({"id": "trust-pack", "version": "1.0.0"}))
+                for runtime in ("claude", "opencode", "codex", "grok"):
+                    _tar_member(tf, f"pkg/{runtime}/skill-a/SKILL.md",
+                                "---\nname: skill-a\ndescription: x\nlicense: MIT\n---\nbody\n")
+                    _tar_member(tf, f"pkg/{runtime}/agents/security-reviewer.md",
+                                "---\nname: security-reviewer\ndescription: x\n---\nbody\n")
+                _tar_member(tf, "pkg/codex/agents/security-reviewer.toml",
+                            'name = "security-reviewer"\ndescription = "x"\n')
+                _tar_member(tf, "pkg/hermes/agents/README.md", "# guide\n")
+                _tar_member(tf, "pkg/AGENTS.md", "---\nlicense: MIT\n---\n# setup\n")
+            (self.root / "pkg.tar.gz").write_bytes(buf.getvalue())
+            try:
+                removed = inst.remove_package(pkg, list(RUNTIMES))
+            finally:
+                inst.cache_path = orig_cache
+            for runtime in ("claude", "opencode", "codex", "grok"):
+                dest = inst.RUNTIME_AGENT_DIRS[runtime]
+                assert dest is not None
+                self.assertEqual(list(dest.iterdir()), [], f"{runtime} agents not removed")
+            self.assertTrue(any("agents" in r for r in removed))
+        finally:
+            inst.RUNTIME_DIRS = orig
+            inst.RUNTIME_AGENT_DIRS = orig_agents
+
+    def test_install_layouts_ignores_agents_without_agent_layout(self):
+        """A package with no agents/ layout installs skills only (older
+        packages, e.g. pre-3.1.0 tarballs) without error."""
+        import agentscan.installer as inst
+
+        pkg = make_pkg()
+        tmp = self.root / "pkg"
+        layout = tmp / "claude" / "skill-a"
+        layout.mkdir(parents=True)
+        (layout / "SKILL.md").write_text(
+            "---\nname: skill-a\ndescription: x\nlicense: MIT\n---\nbody\n"
+        )
+        (tmp / "AGENTS.md").write_text("---\nlicense: MIT\n---\n# setup\n")
+
+        orig = inst.RUNTIME_DIRS
+        orig_agents = inst.RUNTIME_AGENT_DIRS
+        inst.RUNTIME_DIRS = {"claude": self.root / "claude-skills"}
+        inst.RUNTIME_AGENT_DIRS = {"claude": self.root / "claude-agents", "hermes": None}
+        try:
+            inst.install_layouts(tmp, pkg, ["claude"])
+            self.assertTrue(
+                (inst.RUNTIME_DIRS["claude"] / "skill-a" / "SKILL.md").is_file()
+            )
+            claude_agents = inst.RUNTIME_AGENT_DIRS["claude"]
+            self.assertIsNotNone(claude_agents)
+            assert claude_agents is not None
+            self.assertFalse(claude_agents.exists())
+        finally:
+            inst.RUNTIME_DIRS = orig
+            inst.RUNTIME_AGENT_DIRS = orig_agents
+
 
 if __name__ == "__main__":
     unittest.main()
