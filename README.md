@@ -5,6 +5,9 @@
 A deterministic, local security scanner for AI agent skills — plus the
 Trusted Distribution: a curated, continuously audited package registry.
 
+**Website:** [agentscan.baldbee.me](https://agentscan.baldbee.me) — docs,
+scan examples, and the Trust Pack storefront.
+
 ```bash
 pip install agentscan-cli
 
