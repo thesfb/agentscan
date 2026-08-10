@@ -28,8 +28,9 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/thesfb/scanaskill"
-Repository = "https://github.com/thesfb/scanaskill"
+Homepage = "https://agentscan.baldbee.me"
+Repository = "https://github.com/thesfb/agentscan"
+Documentation = "https://agentscan.baldbee.me/docs"
 
 [project.scripts]
 agentscan = "agentscan.cli:run"

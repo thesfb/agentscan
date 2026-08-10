@@ -1,5 +1,9 @@
 # agentscan
 
+[![PyPI version](https://img.shields.io/pypi/v/agentscan-cli)](https://pypi.org/project/agentscan-cli/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![PyPI downloads](https://img.shields.io/pypi/dm/agentscan-cli)](https://pypi.org/project/agentscan-cli/)
+
 **The trust layer for AI agent skills.**
 
 A deterministic, local security scanner for AI agent skills — plus the
