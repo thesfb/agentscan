@@ -237,7 +237,7 @@ report to the Security tab.
 ```yaml
 repos:
   - repo: https://github.com/thesfb/scanaskill
-    rev: v1.2.1
+    rev: v1.2.2
     hooks:
       - id: agentscan
         args: ["--severity", "high"]
