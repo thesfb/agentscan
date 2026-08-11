@@ -1,0 +1,28 @@
+# Pre-commit hooks for the agentscan scanner.
+#
+# Use in your repo's .pre-commit-config.yaml:
+#
+#   repos:
+#     - repo: https://github.com/thesfb/scanaskill
+#       rev: v1.2.1
+#       hooks:
+#         - id: agentscan
+#           args: ["--severity", "high"]
+#
+# The hook scans the whole working tree (skills live in many formats),
+# so it is configured with `pass_filenames: false`. Findings at or above
+# the severity threshold block the commit. Exit codes: 0 clean · 1
+# findings at/above threshold · 2 usage error.
+#
+# To accept an existing baseline first, run:
+#   python3 -m scanaskill . --baseline-write .agentscan-baseline.json
+# and add `args: ["--baseline", ".agentscan-baseline.json"]`.
+
+- id: agentscan
+  name: agentscan
+  description: Deterministic security scan of AI agent skills (shell, network, secrets, license, supply chain). Blocks commits on findings at/above the severity threshold.
+  entry: agentscan scan
+  language: python
+  pass_filenames: false
+  always_run: true
+  minimum_pre_commit_version: "2.9.2"

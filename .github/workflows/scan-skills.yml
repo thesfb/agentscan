@@ -1,0 +1,64 @@
+name: Scan agent skills
+
+# Example CI workflow: scan every skill before it merges.
+# Copy this file into your repo (.github/workflows/) and enable
+# code scanning under Settings → Code security → Code scanning.
+#
+# What it does:
+#   - installs the agentscan CLI (PyPI, MIT)
+#   - runs a deterministic scan over the repo
+#   - fails the job when findings reach the configured severity
+#   - uploads SARIF to GitHub code scanning
+#
+# Exit codes: 0 clean · 1 findings at/above threshold · 2 usage error.
+# The scanner never executes a skill and never uploads your files.
+# Adjust the `paths` filter to match where you keep skills.
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "**/SKILL.md"
+      - "**/.mcp.json"
+      - "**/skills/**"
+      - "**/.cursor/**"
+  pull_request:
+    paths:
+      - "**/SKILL.md"
+      - "**/.mcp.json"
+      - "**/skills/**"
+      - "**/.cursor/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install agentscan
+        run: pip install agentscan-cli
+
+      - name: Scan skills (fail on high+)
+        run: agentscan scan . --severity high
+
+      - name: Upload SARIF to code scanning
+        if: always()
+        run: scanaskill . --sarif > agentscan.sarif || true
+
+      - name: Upload results
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: agentscan.sarif
+          category: agentscan
