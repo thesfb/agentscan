@@ -126,12 +126,12 @@ quiet.
 
 ## The Trusted Distribution (paid)
 
-Access to curated, security-reviewed packages. Buy once (`$49`), receive a
+Access to curated, security-reviewed packages. Buy once (`$59`), receive a
 license key, activate, install. No dashboard, no browser login, no accounts —
 it's a developer tool.
 
 ```
-Buy ($49, Polar checkout)
+Buy ($59, Polar checkout)
   ↓
 License key (shown on your Polar purchases page)
   ↓
@@ -203,6 +203,55 @@ agentscan install Trust Pack
 agentscan install trust
 agentscan install trustpac        # typos are suggested, not silent
 ```
+
+### Integrations (ecosystem distribution)
+
+The scanner ships as visible artifacts, not just a CLI. Each one is a
+searchable distribution channel:
+
+| Artifact | What it gives you | Where
+|---|---|---|
+| **GitHub Action** | Scan skills on push/PR, fail the build on risky skills | `uses: thesfb/agentscan-action@v1` (marketplace) — or copy `.github/workflows/scan-skills.yml` for SARIF code-scanning |
+| **pre-commit hook** | Fail the commit when a scan finds issues at/above your threshold | `.pre-commit-hooks.yaml` (add the repo to your pre-commit config) |
+| **MCP server** | Scan a skill directory from any MCP client (Claude, Cursor, agents) | `python3 -m agentscan.mcp` or `agentscan-mcp` |
+| **PyPI package** | `pip install agentscan-cli` — scanner + distribution CLI | pypi.org/project/agentscan-cli |
+
+**GitHub Action** — add one step to any workflow (published action,
+[thesfb/agentscan-action](https://github.com/thesfb/agentscan-action)):
+
+```yaml
+- uses: thesfb/agentscan-action@v1
+  with:
+    path: .          # directory of skills to scan (default: repo root)
+    severity: high   # fail when a finding is at/above this (default: high)
+```
+
+The action runs the scan in a container, fails the job when a finding
+reaches the severity threshold, and is fully local. For SARIF upload to
+GitHub code scanning, copy `.github/workflows/scan-skills.yml` into your
+repo instead — it installs the CLI, scans every push/PR, and uploads the
+report to the Security tab.
+
+**pre-commit** — add to `.pre-commit-config.yaml`:
+
+```yaml
+repos:
+  - repo: https://github.com/thesfb/scanaskill
+    rev: v1.2.1
+    hooks:
+      - id: agentscan
+        args: ["--severity", "high"]
+```
+
+**MCP server** — run `agentscan-mcp` and register it in any MCP client:
+
+```json
+{"mcpServers": {"agentscan": {"command": "agentscan-mcp", "args": []}}}
+```
+
+The server exposes one tool, `scan`, that returns a portable JSON report
+for any local skill directory. Stdlib only, deterministic, executes
+nothing.
 
 ### Runtimes
 
