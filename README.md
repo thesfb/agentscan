@@ -381,9 +381,9 @@ Pure stdlib, Python 3.8+, works offline. To point the CLI at a local server:
 ```bash
 export AGENTSCAN_API_URL=http://localhost:3100   # overrides the default API
 ```
-##quick start
-##usage 
-##contributing
+##Quick Start
+##Usage 
+##Contributing
 
 ## License
 
