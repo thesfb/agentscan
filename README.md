@@ -65,6 +65,7 @@ scanned 1 artifact(s), 8 finding(s)
 ```
 
 Exit codes: `0` clean · `1` findings at/above threshold · `2` usage error.
+##Motivation
 
 ### What it checks
 
